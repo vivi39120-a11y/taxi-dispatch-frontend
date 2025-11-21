@@ -1,0 +1,345 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+}
+
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+}
+
+.uber-dispatch-root {
+  position: relative;
+  height: 100vh;
+  background: #050816; /* 深色背景 */
+  color: #f9fafb;
+  overflow: hidden;
+}
+
+/* ---------- TopBar（Uber 風格） ---------- */
+
+.uber-dispatch-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 12px 16px;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.75),
+    rgba(0, 0, 0, 0)
+  );
+  pointer-events: none; /* 不擋地圖滑動 */
+}
+
+.uber-dispatch-topbar > * {
+  pointer-events: auto; /* 裡面的元素可以點 */
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.brand-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #22c55e;
+}
+
+.brand-text {
+  font-size: 16px;
+}
+
+.brand-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #d1d5db;
+}
+
+.topbar-right .lang-pill {
+  background: rgba(17, 24, 39, 0.9);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 下拉選單本體：字黑、外框綠 */
+.lang-pill select {
+  background: #ffffff;
+  border: 1px solid #22c55e;   /* 綠色框框 */
+  border-radius: 999px;
+  color: #000000;              /* 黑色文字 */
+  font-size: 12px;
+  padding: 2px 8px;
+  outline: none;
+}
+
+/* 選到時再亮一點綠色 */
+.lang-pill select:focus {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.4);
+}
+
+/* 下拉清單裡的每一個 option 文字也改成黑色 */
+.lang-pill select option {
+  color: #000000;
+}
+/* 下拉清單裡每一個選項的基本樣式 */
+.lang-pill select option {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+
+
+/* ---------- 主體：全螢幕地圖 + bottom sheet ---------- */
+
+.uber-dispatch-main {
+  position: relative;
+  height: 100%;
+}
+
+.uber-dispatch-map {
+  height: 100%;
+}
+
+/* Leaflet */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* bottom sheet 容器 */
+.uber-dispatch-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0 12px 12px;
+  z-index: 900;
+  pointer-events: none;
+}
+
+/* 大螢幕時改成右下角卡片（像面板） */
+@media (min-width: 900px) {
+  .uber-dispatch-sheet {
+    left: auto;
+    width: 380px;
+  }
+}
+
+/* 上面那條小把手 */
+.sheet-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(156, 163, 175, 0.8);
+  margin: 0 auto 6px;
+}
+
+/* 裡面的真正內容 */
+.sheet-inner {
+  pointer-events: auto;
+  background: #111827;
+  border-radius: 20px 20px 12px 12px;
+  padding: 10px 12px 12px;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.6);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #e5e7eb;
+  font-size: 14px;
+}
+
+/* ---------- 右側三個區塊：訂單列表 / 詳細 / 按鈕 ---------- */
+
+.order-list {
+  flex: 1.4;
+  overflow-y: auto;
+}
+
+.order-detail {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.control-panel {
+  margin-top: 4px;
+}
+
+.order-list h2,
+.order-detail h2,
+.control-panel h2 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* 訂單列表樣式 */
+
+.order-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.order-list li {
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: rgba(31, 41, 55, 0.9);
+}
+
+.order-list li:hover {
+  background: rgba(55, 65, 81, 0.95);
+}
+
+.order-list li.selected {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.4);
+}
+
+.small {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* 按鈕 */
+
+button {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: none;
+  background: #22c55e;
+  color: #111827;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+button + button {
+  margin-left: 8px;
+}
+
+button:hover {
+  background: #16a34a;
+}
+
+button:active {
+  background: #15803d;
+}
+/* 角色切換按鈕（乘客端 / 司機端） */
+.topbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+.view-switch {
+  display: inline-flex;
+  background: rgba(31, 41, 55, 0.9);
+  border-radius: 999px;
+  padding: 2px;
+}
+
+.view-switch-btn {
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  background: transparent;
+  color: #e5e7eb;
+  border: none;
+  cursor: pointer;
+}
+
+.view-switch-btn.active {
+  background: #f9fafb;
+  color: #111827;
+}
+
+/* 讓 bottom sheet 能相對於每個角色 view 定位 */
+.role-view {
+  position: relative;
+  height: 100%;
+}
+
+/* 乘客表單 & 司機資訊簡單排版 */
+.rider-form label,
+.driver-info label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.rider-form select,
+.driver-info select {
+  width: 100%;
+  margin-top: 2px;
+}
+
+.rider-form button {
+  margin-top: 4px;
+  width: 100%;
+}
+
+.order-card {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(31, 41, 55, 0.9);
+}
+
+.driver-trip-status,
+.rider-status {
+  margin-top: 6px;
+  font-size: 13px;
+}
+/* 共用的自訂 marker 外觀 */
+.custom-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 18px;
+  background: #ffffff;
+  border: 2px solid #111827;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* 乘客：綠色小人 */
+.custom-marker-passenger {
+  background: #22c55e;
+  border-color: #22c55e;
+  color: #111827;
+}
+
+/* 車輛：黑色小車 */
+.custom-marker-car {
+  background: #111827;
+  border-color: #111827;
+  color: #f9fafb;
+}
