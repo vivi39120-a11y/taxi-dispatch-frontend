@@ -95,19 +95,21 @@ app.post('/api/orders/:id/accept', (req, res) => {
 });
 
 // ===== 靜態檔案：把 React build 出來的 dist 當網站根目錄 =====
+// 靜態檔案：dist
 const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));
 
-// SPA fallback：除了 /api 開頭，其它路徑都交給 React 的 index.html
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) return next();
+// SPA fallback：非 /api 開頭的路徑，全部回傳 React 的 index.html
+// 注意：這裡改成「正規表達式」，就不會再出現 Missing parameter name at index 1: * 的錯誤
+app.get(/^(?!\/api).*/, (req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
+
 
 // ===== 啟動 Server =====
 const PORT = process.env.PORT || 4000;
 
-// 0.0.0.0 讓同一個網路裡其他裝置也能連進來
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
+
