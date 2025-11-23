@@ -343,3 +343,88 @@ button:active {
   border-color: #111827;
   color: #f9fafb;
 }
+.role-select-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.role-select-card {
+  background: rgba(15, 23, 42, 0.96);
+  border-radius: 1.5rem;
+  padding: 2rem 2.5rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+}
+
+.role-select-card h2 {
+  font-size: 1.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.role-select-sub {
+  font-size: 0.95rem;
+  opacity: 0.85;
+  margin-bottom: 1.5rem;
+}
+
+.role-select-buttons {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.role-btn {
+  flex: 1 1 160px;
+  border-radius: 999px;
+  padding: 0.8rem 1.4rem;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #f9fafb;
+}
+
+.role-btn.passenger {
+  background: #16a34a;
+}
+
+.role-btn.passenger:hover {
+  background: #15803d;
+}
+
+.role-btn.driver {
+  background: #0ea5e9;
+}
+
+.role-btn.driver:hover {
+  background: #0284c7;
+}
+
+.current-role-label {
+  font-size: 0.95rem;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.5);
+}
+
+.switch-role-btn {
+  margin-left: 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.8);
+  background: transparent;
+  color: #e5e7eb;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.switch-role-btn:hover {
+  border-color: #facc15;
+  color: #facc15;
+}

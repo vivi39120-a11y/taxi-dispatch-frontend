@@ -6,8 +6,6 @@ import { translations, LANGS, DEFAULT_LANG } from './i18n';
 import './App.css';
 
 // 🔹 API 位址：自動用現在網址的 host
-// src/App.jsx
-// 所有 API 都打同一個來源 + /api （不管 host / port）
 const API_BASE = '/api';
 
 // 紐約中心點
@@ -32,8 +30,8 @@ const VIEW = {
 };
 
 function App() {
-  // 畫面是乘客端還是司機端
-  const [view, setView] = useState(VIEW.RIDER);
+  // 🔹 目前是乘客端還是司機端（預設 null：先讓使用者選）
+  const [role, setRole] = useState(null);
 
   // 共用狀態：司機 + 訂單（從 API 來）
   const [drivers, setDrivers] = useState([]);
@@ -103,14 +101,11 @@ function App() {
   // 司機接單 → 呼叫後端 API
   const handleDriverAccept = async (orderId, driverId) => {
     try {
-      const res = await fetch(
-        `${API_BASE}/orders/${orderId}/accept`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ driverId }),
-        }
-      );
+      const res = await fetch(`${API_BASE}/orders/${orderId}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driverId }),
+      });
       const data = await res.json();
       if (!data.order) {
         console.error('接單 API 回傳錯誤', data);
@@ -122,16 +117,12 @@ function App() {
 
       // 先樂觀更新一下
       setOrders((prev) =>
-        prev.map((o) =>
-          o.id === updatedOrder.id ? updatedOrder : o
-        )
+        prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o))
       );
       if (updatedDriver) {
         setDrivers((prev) =>
           prev.map((d) =>
-            String(d.id) === String(updatedDriver.id)
-              ? updatedDriver
-              : d
+            String(d.id) === String(updatedDriver.id) ? updatedDriver : d
           )
         );
       }
@@ -145,9 +136,38 @@ function App() {
     setLang(e.target.value);
   };
 
+  // 🔹 第一次要先選「乘客 / 司機」的畫面
+  const renderRoleSelect = () => {
+    return (
+      <div className="role-select-wrapper">
+        <div className="role-select-card">
+          <h2>{t.chooseRoleTitle ?? '請選擇使用模式'}</h2>
+          <p className="role-select-sub">
+            {t.chooseRoleSub ??
+              '你可以選擇以乘客或司機身分使用系統，選擇後只會看到對應的畫面。'}
+          </p>
+          <div className="role-select-buttons">
+            <button
+              className="role-btn passenger"
+              onClick={() => setRole(VIEW.RIDER)}
+            >
+              {t.riderTab ?? '乘客 Passenger'}
+            </button>
+            <button
+              className="role-btn driver"
+              onClick={() => setRole(VIEW.DRIVER)}
+            >
+              {t.driverTab ?? '司機 Driver'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="uber-dispatch-root">
-      {/* 上方 bar：品牌 + 角色切換 + 語言切換 */}
+      {/* 上方 bar：品牌 + 目前模式 + 語言切換 */}
       <header className="uber-dispatch-topbar">
         <div className="topbar-left">
           <div className="brand-row">
@@ -155,53 +175,63 @@ function App() {
             <span className="brand-text">NY Taxi Demo</span>
           </div>
           <div className="brand-sub">
-            {t.subtitle ??
-              '同一個前端模擬 乘客端 / 司機端 即時連動'}
+            {t.subtitle ?? '乘客端 / 司機端 透過同一個後端即時連動'}
           </div>
         </div>
 
         <div className="topbar-center">
-          <div className="view-switch">
-            <button
-              className={
-                'view-switch-btn' +
-                (view === VIEW.RIDER ? ' active' : '')
-              }
-              onClick={() => setView(VIEW.RIDER)}
-            >
-              {t.riderTab ?? '乘客端'}
-            </button>
-            <button
-              className={
-                'view-switch-btn' +
-                (view === VIEW.DRIVER ? ' active' : '')
-              }
-              onClick={() => setView(VIEW.DRIVER)}
-            >
-              {t.driverTab ?? '司機端'}
-            </button>
-          </div>
+          {role === VIEW.RIDER && (
+            <div className="current-role-label">
+              {t.riderTab ?? '乘客端 Passenger'}
+            </div>
+          )}
+          {role === VIEW.DRIVER && (
+            <div className="current-role-label">
+              {t.driverTab ?? '司機端 Driver'}
+            </div>
+          )}
+          {role === null && (
+            <div className="current-role-label">
+              {t.chooseRoleShort ?? '請先選擇乘客或司機'}
+            </div>
+          )}
         </div>
 
         <div className="topbar-right">
           <label className="lang-pill">
             {(t.languageLabel ?? '語言') + '：'}
             <select value={lang} onChange={handleLangChange}>
-              {Object.entries(LANGS).map(
-                ([code, label]) => (
-                  <option key={code} value={code}>
-                    {label}
-                  </option>
-                )
-              )}
+              {Object.entries(LANGS).map(([code, label]) => (
+                <option key={code} value={code}>
+                  {label}
+                </option>
+              ))}
             </select>
           </label>
+
+          {/* 方便你測試，如果不想讓使用者切換，可以把這整個 button 刪掉 */}
+          {role && (
+            <button
+              className="switch-role-btn"
+              onClick={() => {
+                setRole(null);
+                setMyOrderId(null);
+                setCurrentDriverId(null);
+              }}
+            >
+              {t.switchRole ?? '切換模式'}
+            </button>
+          )}
         </div>
       </header>
 
       {/* 主畫面 */}
       <div className="uber-dispatch-main">
-        {view === VIEW.RIDER && (
+        {/* 還沒選角色 → 顯示選擇畫面 */}
+        {role === null && renderRoleSelect()}
+
+        {/* 只顯示其中一端 */}
+        {role === VIEW.RIDER && (
           <RiderView
             center={NYC_CENTER}
             places={PLACES}
@@ -213,7 +243,7 @@ function App() {
           />
         )}
 
-        {view === VIEW.DRIVER && (
+        {role === VIEW.DRIVER && (
           <DriverView
             center={NYC_CENTER}
             drivers={drivers}
