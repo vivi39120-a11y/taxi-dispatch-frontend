@@ -1,19 +1,26 @@
 // src/App.jsx
 import { useEffect, useState } from "react";
+
+// 地圖相關畫面
 import RiderView from "./views/RiderView";
 import DriverView from "./views/DriverView";
-import AuthPage from "./AuthPage"; // 之前做的登入/註冊頁
-import LandingPage from "./LandingPage"; // 剛新增的 Landing
+
+// Landing + 登入/註冊
+import LandingPage from "./LandingPage";
+import AuthPage from "./AuthPage";
+
+// 多國語系
 import { translations, LANGS, DEFAULT_LANG } from "./i18n";
+
 import "./App.css";
 
-// 所有 API 都打自己後端的 /api
+// 後端 API 的 base 路徑（前後端同一個 domain，用 /api 就好）
 const API_BASE = "/api";
 
 // 紐約中心點
 const NYC_CENTER = [40.758, -73.9855];
 
-// 固定幾個地點（上車 / 目的地選單用）
+// 固定地點（乘客下單的起訖點選單）
 const PLACES = [
   { id: "ts", name: "Times Square", lat: 40.758, lng: -73.9855 },
   { id: "cp", name: "Central Park", lat: 40.7812, lng: -73.9665 },
@@ -32,68 +39,58 @@ const VIEW = {
 };
 
 const PAGE = {
-  LANDING: "landing",
-  APP: "app",
-  AUTH: "auth",
+  LANDING: "landing", // 首頁（三個按鈕）
+  APP: "app",         // 地圖（乘客 / 司機）
+  AUTH: "auth",       // 登入 / 註冊
 };
 
-// 根據 URL 決定預設是乘客或司機
-function getInitialView() {
-  const params = new URLSearchParams(window.location.search);
-  const role = params.get("role");
-  if (role === "driver") return VIEW.DRIVER;
-  return VIEW.RIDER;
-}
-
-// 根據 URL 決定是 landing / app / auth
-function getInitialPage() {
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("page") === "auth") return PAGE.AUTH;
-  if (params.get("role")) return PAGE.APP;
-  return PAGE.LANDING; // 沒帶東西就 landing
-}
-
-// 更新網址 query（不重整頁面）
-function updateUrlQuery({ role, page }) {
-  const params = new URLSearchParams();
-
-  if (page === PAGE.AUTH) {
-    params.set("page", "auth");
-  } else if (role) {
-    params.set("role", role);
-  }
-
-  const query = params.toString();
-  const newUrl = query
-    ? `${window.location.pathname}?${query}`
-    : window.location.pathname;
-
-  window.history.pushState({}, "", newUrl);
-}
-
 function App() {
-  // 畫面：landing / app / auth
-  const [page, setPage] = useState(getInitialPage);
+  // ===== 語言 =====
+  const [lang, setLang] = useState(DEFAULT_LANG);
+  const t = translations[lang] || translations[DEFAULT_LANG];
 
-  // app 裡面的端：乘客 or 司機
-  const [view, setView] = useState(getInitialView);
+  // ===== 讀網址參數，決定初始頁面 / 初始角色 =====
+  const [page, setPage] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("page") || PAGE.LANDING; // ⭐ 預設是 landing
+  });
 
-  // 共用狀態：司機 + 訂單（從 API 來）
+  const [view, setView] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const role = params.get("role");
+    if (role === "driver") return VIEW.DRIVER;
+    return VIEW.RIDER; // 預設乘客端
+  });
+
+  // ===== 共用狀態：司機 / 訂單 =====
   const [drivers, setDrivers] = useState([]);
   const [orders, setOrders] = useState([]);
 
-  // 這個瀏覽器視角的「我的訂單 / 我是哪個司機」
+  // 這個瀏覽器視角自己的資訊
   const [myOrderId, setMyOrderId] = useState(null);
   const [currentDriverId, setCurrentDriverId] = useState(null);
 
-  // 目前登入的使用者（假資料庫）
-  const [currentUser, setCurrentUser] = useState(null);
+  // ===== 語言切換 =====
+  const handleLangChange = (e) => {
+    setLang(e.target.value);
+  };
 
-  // 語言
-  const [lang, setLang] = useState(DEFAULT_LANG);
-  const t = translations[lang];
+  // ===== 把 page / view 同步到網址參數（方便分享連結） =====
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
 
-  // 從後端抓 orders + drivers，只有在 page === APP 時才抓
+    params.set("page", page);
+    if (page === PAGE.APP) {
+      params.set("role", view === VIEW.DRIVER ? "driver" : "passenger");
+    } else {
+      params.delete("role");
+    }
+
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState({}, "", newUrl);
+  }, [page, view]);
+
+  // ===== 從後端抓 orders + drivers（只要在 APP 頁就定時抓） =====
   useEffect(() => {
     if (page !== PAGE.APP) return;
 
@@ -103,6 +100,7 @@ function App() {
           fetch(`${API_BASE}/orders`),
           fetch(`${API_BASE}/drivers`),
         ]);
+
         const [ordersData, driversData] = await Promise.all([
           ordersRes.json(),
           driversRes.json(),
@@ -111,7 +109,7 @@ function App() {
         setOrders(ordersData);
         setDrivers(driversData);
 
-        // 如果還沒選司機，就預設第一個
+        // 如果還沒選司機，就預設第一位
         if (!currentDriverId && driversData.length > 0) {
           setCurrentDriverId(String(driversData[0].id));
         }
@@ -121,21 +119,11 @@ function App() {
     };
 
     fetchAll();
-    const id = setInterval(fetchAll, 2000); // 每 2 秒重新抓
+    const id = setInterval(fetchAll, 2000);
     return () => clearInterval(id);
   }, [page, currentDriverId]);
 
-  // 處理瀏覽器「上一頁 / 下一頁」：同步 page / view
-  useEffect(() => {
-    const onPop = () => {
-      setPage(getInitialPage());
-      setView(getInitialView());
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
-
-  // 乘客建立訂單 → 呼叫後端 API
+  // ===== 乘客建立訂單 =====
   const handleCreateOrder = async ({ pickupId, dropoffId }) => {
     const pickup = PLACES.find((p) => p.id === pickupId);
     const dropoff = PLACES.find((p) => p.id === dropoffId);
@@ -147,16 +135,13 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pickup, dropoff }),
       });
-      const created = await res.json();
 
       if (!res.ok) {
-        console.error("建立訂單錯誤", created);
-        alert(created.error || "建立訂單失敗");
-        return;
+        throw new Error(`建立訂單失敗：${res.status}`);
       }
 
-      // 先自己加進來（不用等 2 秒後的輪詢）
-      setOrders((prev) => [...prev, created]);
+      const created = await res.json();
+      setOrders((prev) => [...prev, created]); // 先樂觀加入
       setMyOrderId(created.id);
     } catch (err) {
       console.error("建立訂單失敗", err);
@@ -164,7 +149,7 @@ function App() {
     }
   };
 
-  // 司機接單 → 呼叫後端 API
+  // ===== 司機接單 =====
   const handleDriverAccept = async (orderId, driverId) => {
     try {
       const res = await fetch(`${API_BASE}/orders/${orderId}/accept`, {
@@ -172,18 +157,20 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ driverId }),
       });
-      const data = await res.json();
 
       if (!res.ok) {
-        console.error("接單 API 回傳錯誤", data);
-        alert(data.error || "接單失敗");
+        throw new Error(`接單 API 回應失敗：${res.status}`);
+      }
+
+      const data = await res.json();
+      if (!data.order) {
+        console.error("接單 API 回傳格式不正確：", data);
         return;
       }
 
       const updatedOrder = data.order;
       const updatedDriver = data.driver;
 
-      // 更新 orders & drivers
       setOrders((prev) =>
         prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o))
       );
@@ -201,57 +188,46 @@ function App() {
     }
   };
 
-  const handleLangChange = (e) => {
-    setLang(e.target.value);
-  };
+  // ===== 導覽用的幾個 helper =====
+  const goLanding = () => setPage(PAGE.LANDING);
 
-  // 從 Landing 切到乘客端
-  const goToPassengerApp = () => {
-    setPage(PAGE.APP);
+  const goPassengerApp = () => {
     setView(VIEW.RIDER);
-    updateUrlQuery({ role: "passenger" });
-  };
-
-  // 從 Landing 切到司機端
-  const goToDriverApp = () => {
     setPage(PAGE.APP);
+  };
+
+  const goDriverApp = () => {
     setView(VIEW.DRIVER);
-    updateUrlQuery({ role: "driver" });
+    setPage(PAGE.APP);
   };
 
-  // 從 Landing 切到登入頁
-  const goToAuth = () => {
-    setPage(PAGE.AUTH);
-    updateUrlQuery({ page: PAGE.AUTH });
-  };
+  const goAuth = () => setPage(PAGE.AUTH);
 
-  // 登入 / 註冊成功
-  const handleAuthSuccess = (user) => {
-    setCurrentUser(user);
+  // ===== 實際畫面切換 =====
 
-    if (user.role === "driver") {
-      setView(VIEW.DRIVER);
-      setPage(PAGE.APP);
-      updateUrlQuery({ role: "driver" });
-    } else {
-      setView(VIEW.RIDER);
-      setPage(PAGE.APP);
-      updateUrlQuery({ role: "passenger" });
-    }
-  };
-
-  // ====== 如果是在 Landing 頁，就只顯示 LandingPage ======
+  // 1) 首頁 Landing（三個按鈕）
   if (page === PAGE.LANDING) {
     return (
       <LandingPage
-        onSelectPassenger={goToPassengerApp}
-        onSelectDriver={goToDriverApp}
-        onSelectAuth={goToAuth}
+        onGoPassenger={goPassengerApp}
+        onGoDriver={goDriverApp}
+        onGoAuth={goAuth}
       />
     );
   }
 
-  // ====== 其餘頁面：上方是黑色 topbar，下方是 Auth 或 App 地圖 ======
+  // 2) 登入 / 註冊頁
+  if (page === PAGE.AUTH) {
+    return (
+      <AuthPage
+        lang={lang}
+        onLangChange={handleLangChange}
+        onBack={goLanding}
+      />
+    );
+  }
+
+  // 3) 地圖 App（乘客端 / 司機端）
   return (
     <div className="uber-dispatch-root">
       {/* 上方 bar：品牌 + 角色切換 + 語言切換 */}
@@ -267,46 +243,29 @@ function App() {
         </div>
 
         <div className="topbar-center">
-          {page === PAGE.APP && (
-            <div className="view-switch">
-              <button
-                className={
-                  "view-switch-btn" +
-                  (view === VIEW.RIDER ? " active" : "")
-                }
-                onClick={() => {
-                  setView(VIEW.RIDER);
-                  updateUrlQuery({ role: "passenger" });
-                }}
-              >
-                {t.riderTab ?? "乘客端"}
-              </button>
-              <button
-                className={
-                  "view-switch-btn" +
-                  (view === VIEW.DRIVER ? " active" : "")
-                }
-                onClick={() => {
-                  setView(VIEW.DRIVER);
-                  updateUrlQuery({ role: "driver" });
-                }}
-              >
-                {t.driverTab ?? "司機端"}
-              </button>
-            </div>
-          )}
+          <div className="view-switch">
+            <button
+              className={
+                "view-switch-btn" +
+                (view === VIEW.RIDER ? " active" : "")
+              }
+              onClick={() => setView(VIEW.RIDER)}
+            >
+              {t.riderTab ?? "乘客端"}
+            </button>
+            <button
+              className={
+                "view-switch-btn" +
+                (view === VIEW.DRIVER ? " active" : "")
+              }
+              onClick={() => setView(VIEW.DRIVER)}
+            >
+              {t.driverTab ?? "司機端"}
+            </button>
+          </div>
         </div>
 
         <div className="topbar-right">
-          {currentUser && (
-            <div className="user-pill">
-              <span className="user-role">
-                {currentUser.role === "driver" ? "司機" : "乘客"}
-              </span>
-              <span className="user-name">{currentUser.name}</span>
-            </div>
-          )}
-
           <label className="lang-pill">
             {(t.languageLabel ?? "語言") + "："}
             <select value={lang} onChange={handleLangChange}>
@@ -320,36 +279,30 @@ function App() {
         </div>
       </header>
 
-      {/* 主畫面 */}
+      {/* 主畫面：乘客端 / 司機端 */}
       <div className="uber-dispatch-main">
-        {page === PAGE.AUTH ? (
-          <AuthPage onSuccess={handleAuthSuccess} />
-        ) : (
-          <>
-            {view === VIEW.RIDER && (
-              <RiderView
-                center={NYC_CENTER}
-                places={PLACES}
-                drivers={drivers}
-                orders={orders}
-                myOrderId={myOrderId}
-                onCreateOrder={handleCreateOrder}
-                t={t}
-              />
-            )}
+        {view === VIEW.RIDER && (
+          <RiderView
+            center={NYC_CENTER}
+            places={PLACES}
+            drivers={drivers}
+            orders={orders}
+            myOrderId={myOrderId}
+            onCreateOrder={handleCreateOrder}
+            t={t}
+          />
+        )}
 
-            {view === VIEW.DRIVER && (
-              <DriverView
-                center={NYC_CENTER}
-                drivers={drivers}
-                orders={orders}
-                currentDriverId={currentDriverId}
-                setCurrentDriverId={setCurrentDriverId}
-                onAcceptOrder={handleDriverAccept}
-                t={t}
-              />
-            )}
-          </>
+        {view === VIEW.DRIVER && (
+          <DriverView
+            center={NYC_CENTER}
+            drivers={drivers}
+            orders={orders}
+            currentDriverId={currentDriverId}
+            setCurrentDriverId={setCurrentDriverId}
+            onAcceptOrder={handleDriverAccept}
+            t={t}
+          />
         )}
       </div>
     </div>
