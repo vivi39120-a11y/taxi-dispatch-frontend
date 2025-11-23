@@ -1,6 +1,5 @@
 // src/i18n.js
 
-// 下拉選單顯示的語言名稱
 export const LANGS = {
   zh: '中文',
   en: 'English',
@@ -10,159 +9,105 @@ export const LANGS = {
 
 export const DEFAULT_LANG = 'zh';
 
-// 各語言的文字
 export const translations = {
   zh: {
+    // 共用
     subtitle: '同一個前端模擬 乘客端 / 司機端 即時連動',
     riderTab: '乘客端',
     driverTab: '司機端',
     languageLabel: '語言',
 
-    riderTitle: '乘客端',
-    pickupLabel: '上車地點',
-    dropoffLabel: '目的地',
-    requestRideButton: '叫車',
+    // Landing / 介紹用（如果有用得到）
+    landingTitle: '計程車派遣系統',
+    landingDesc: '利用大數據分析，讓您不浪費時間等待。',
+    landingPassengerBtn: '我是乘客',
+    landingDriverBtn: '我是司機',
+    landingAuthBtn: '登入 / 註冊',
 
-    orderIdLabel: '訂單 ID',
-    statusLabel: '狀態',
-    waitingDriver: '等待司機接單…',
-    driverAccepted: '司機已接單',
-
-    etaPrefix: '距離約',
-    etaUnitKm: 'km',
-    etaSuffixMin: '預估 {min} 分鐘',
-
-    driverTitle: '司機端',
-    driverCurrent: '目前身分',
-    driverPlate: '車牌',
-    driverSwitchLabel: '切換司機',
-    driverOrderListTitle: '可接的訂單',
-    driverNoOrders: '目前沒有等待中的訂單',
-    driverTakeThisOrder: '接這筆訂單',
-    driverTripTitle: '目前行程',
-
-    mapDriverLabel: '司機',
-    statusAvailable: '待命中',
-    statusOnTrip: '載客中',
-    statusHeading: '前往乘客中',
-    statusUnknown: '未知',
-    mapSelected: '目前顯示中',
-    status: '狀態',
+    // Auth 頁面
+    authTitle: '登入 / 註冊',
+    authLoginTab: '登入',
+    authRegisterTab: '註冊',
+    authEmailLabel: 'Email',
+    authPasswordLabel: '密碼',
+    authLoginButton: '登入',
+    authRegisterButton: '註冊',
+    authHint:
+      '（目前使用記憶體假資料庫，重新啟動伺服器後帳號會消失）',
   },
 
   en: {
-    subtitle: 'Single front-end simulating rider & driver in real time',
-    riderTab: 'Passenger',
+    subtitle:
+      'Single frontend simulating both rider & driver views in real time',
+    riderTab: 'Rider',
     driverTab: 'Driver',
     languageLabel: 'Language',
 
-    riderTitle: 'Passenger',
-    pickupLabel: 'Pickup',
-    dropoffLabel: 'Destination',
-    requestRideButton: 'Request ride',
+    landingTitle: 'Taxi Dispatch System',
+    landingDesc:
+      'Use data intelligence to reduce your waiting time.',
+    landingPassengerBtn: 'I am a rider',
+    landingDriverBtn: 'I am a driver',
+    landingAuthBtn: 'Sign in / Sign up',
 
-    orderIdLabel: 'Order ID',
-    statusLabel: 'Status',
-    waitingDriver: 'Waiting for driver…',
-    driverAccepted: 'Driver accepted',
-
-    etaPrefix: 'About',
-    etaUnitKm: 'km',
-    etaSuffixMin: 'ETA {min} min',
-
-    driverTitle: 'Driver',
-    driverCurrent: 'Current driver',
-    driverPlate: 'Plate',
-    driverSwitchLabel: 'Switch driver',
-    driverOrderListTitle: 'Available orders',
-    driverNoOrders: 'No pending orders',
-    driverTakeThisOrder: 'Take this order',
-    driverTripTitle: 'Current trip',
-
-    mapDriverLabel: 'Driver',
-    statusAvailable: 'Available',
-    statusOnTrip: 'On trip',
-    statusHeading: 'Heading to pickup',
-    statusUnknown: 'Unknown',
-    mapSelected: 'Selected',
-    status: 'Status',
+    authTitle: 'Sign in / Sign up',
+    authLoginTab: 'Sign in',
+    authRegisterTab: 'Sign up',
+    authEmailLabel: 'Email',
+    authPasswordLabel: 'Password',
+    authLoginButton: 'Sign in',
+    authRegisterButton: 'Sign up',
+    authHint:
+      '(Using in-memory demo database; all accounts will be lost after server restart.)',
   },
 
   ko: {
     subtitle:
       '하나의 프론트엔드에서 승객 / 기사 화면을 실시간으로 시뮬레이션',
-    riderTab: '승객',
-    driverTab: '기사',
+    riderTab: '승객 화면',
+    driverTab: '기사 화면',
     languageLabel: '언어',
 
-    riderTitle: '승객',
-    pickupLabel: '승차 위치',
-    dropoffLabel: '도착지',
-    requestRideButton: '호출하기',
+    landingTitle: '택시 배차 시스템',
+    landingDesc:
+      '데이터 분석으로 기다리는 시간을 줄여 줍니다.',
+    landingPassengerBtn: '승객입니다',
+    landingDriverBtn: '기사입니다',
+    landingAuthBtn: '로그인 / 회원가입',
 
-    orderIdLabel: '주문 ID',
-    statusLabel: '상태',
-    waitingDriver: '기사가 배차되기를 기다리는 중…',
-    driverAccepted: '기사가 배차했습니다',
-
-    etaPrefix: '거리 약',
-    etaUnitKm: 'km',
-    etaSuffixMin: '예상 {min}분',
-
-    driverTitle: '기사',
-    driverCurrent: '현재 기사',
-    driverPlate: '차량 번호',
-    driverSwitchLabel: '기사 변경',
-    driverOrderListTitle: '배차 가능한 주문',
-    driverNoOrders: '대기 중인 주문이 없습니다',
-    driverTakeThisOrder: '이 주문 받기',
-    driverTripTitle: '현재 운행',
-
-    mapDriverLabel: '기사',
-    statusAvailable: '대기',
-    statusOnTrip: '운행 중',
-    statusHeading: '승객에게 가는 중',
-    statusUnknown: '알 수 없음',
-    mapSelected: '선택됨',
-    status: '상태',
+    authTitle: '로그인 / 회원가입',
+    authLoginTab: '로그인',
+    authRegisterTab: '회원가입',
+    authEmailLabel: '이메일',
+    authPasswordLabel: '비밀번호',
+    authLoginButton: '로그인',
+    authRegisterButton: '회원가입',
+    authHint:
+      '(현재 메모리 기반 데모 DB를 사용 중이며, 서버가 재시작되면 계정이 삭제됩니다.)',
   },
 
   ja: {
     subtitle:
-      '1つのフロントエンドで 乗客 / ドライバー を同時にシミュレーション',
-    riderTab: '乗客',
-    driverTab: 'ドライバー',
+      '1つのフロントエンドで 乗客 / ドライバー画面をリアルタイムにシミュレート',
+    riderTab: '乗客画面',
+    driverTab: 'ドライバー画面',
     languageLabel: '言語',
 
-    riderTitle: '乗客',
-    pickupLabel: '乗車場所',
-    dropoffLabel: '降車場所',
-    requestRideButton: '配車を依頼',
+    landingTitle: 'タクシー配車システム',
+    landingDesc:
+      'データ分析により待ち時間を短縮します。',
+    landingPassengerBtn: '乗客として利用する',
+    landingDriverBtn: 'ドライバーとして利用する',
+    landingAuthBtn: 'ログイン / 登録',
 
-    orderIdLabel: '注文 ID',
-    statusLabel: 'ステータス',
-    waitingDriver: 'ドライバーを探しています…',
-    driverAccepted: 'ドライバーが受諾しました',
-
-    etaPrefix: '距離 約',
-    etaUnitKm: 'km',
-    etaSuffixMin: '所要時間 約 {min} 分',
-
-    driverTitle: 'ドライバー',
-    driverCurrent: '現在のドライバー',
-    driverPlate: 'ナンバー',
-    driverSwitchLabel: 'ドライバー切替',
-    driverOrderListTitle: '受けられる注文',
-    driverNoOrders: '待機中の注文はありません',
-    driverTakeThisOrder: 'この注文を受ける',
-    driverTripTitle: '現在の走行',
-
-    mapDriverLabel: 'ドライバー',
-    statusAvailable: '待機中',
-    statusOnTrip: '走行中',
-    statusHeading: '迎車中',
-    statusUnknown: '不明',
-    mapSelected: '表示中',
-    status: 'ステータス',
+    authTitle: 'ログイン / 登録',
+    authLoginTab: 'ログイン',
+    authRegisterTab: '新規登録',
+    authEmailLabel: 'メールアドレス',
+    authPasswordLabel: 'パスワード',
+    authLoginButton: 'ログイン',
+    authRegisterButton: '登録',
+    authHint:
+      '（現在はメモリ上のデモ用データベースを使用しており、サーバー再起動後はアカウントが削除されます。）',
   },
 };
