@@ -1,115 +1,183 @@
-// server.js （放在 taxi-dispatch-frontend 專案根目錄）
-import express from 'express';
-import cors from 'cors';
-import path from 'path';
-import { fileURLToPath } from 'url';
+// server.js - taxi dispatch demo backend (ESM)
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+import express from "express";
+import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 
-// === 讓 ES module 也有 __dirname ===
+// 假資料庫：放在記憶體裡（使用者）
+const users = [];
+let nextUserId = 1;
+
+// 解出 __dirname（ESM 版本）
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ===== 共享的假司機資料（所有人共用） =====
+const app = express();
+
+// 中介層
+app.use(cors());
+app.use(express.json());
+
+// ===== 假資料：司機 & 訂單 =====
+
+// 司機列表
 let drivers = [
   {
-    id: 'D1',
-    name: 'Alice',
-    carPlate: 'ABC-1234',
+    id: "D1",
+    name: "Driver 1",
+    plate: "NYC-1001",
     lat: 40.758,
     lng: -73.9855,
-    status: 'available',
+    status: "idle", // idle / ontrip
   },
   {
-    id: 'D2',
-    name: 'Bob',
-    carPlate: 'NY-5678',
-    lat: 40.761,
-    lng: -73.98,
-    status: 'available',
-  },
-  {
-    id: 'D3',
-    name: 'Charlie',
-    carPlate: 'NY-7777',
-    lat: 40.73,
-    lng: -73.99,
-    status: 'available',
+    id: "D2",
+    name: "Driver 2",
+    plate: "NYC-1002",
+    lat: 40.7527,
+    lng: -73.9772,
+    status: "idle",
   },
 ];
 
-let orders = []; // 訂單也放這裡，所有連線的人共用這一份記憶體
+let orders = [];
+let nextOrderId = 1;
 
-// ===== API：取得司機 / 訂單 =====
-app.get('/api/drivers', (req, res) => {
+// ===== API：司機 & 訂單 =====
+
+// 取得所有司機
+app.get("/api/drivers", (req, res) => {
   res.json(drivers);
 });
 
-app.get('/api/orders', (req, res) => {
+// 取得所有訂單
+app.get("/api/orders", (req, res) => {
   res.json(orders);
 });
 
-// ===== API：乘客建立訂單 =====
-app.post('/api/orders', (req, res) => {
+// 乘客下單
+app.post("/api/orders", (req, res) => {
   const { pickup, dropoff } = req.body;
+
   if (!pickup || !dropoff) {
-    return res.status(400).json({ error: 'pickup / dropoff 必填' });
+    return res.status(400).json({ error: "缺少上車地點或目的地" });
   }
 
-  const newOrder = {
-    id: 'O' + Date.now(),
-    pickup,
+  const order = {
+    id: nextOrderId++,
+    pickup, // e.g. { id, name, lat, lng }
     dropoff,
-    status: 'pending',
+    status: "pending", // pending / assigned / completed
     driverId: null,
     createdAt: new Date().toISOString(),
   };
 
-  orders.push(newOrder);
-  console.log('新訂單', newOrder);
-  res.json(newOrder);
+  orders.push(order);
+  res.status(201).json(order);
 });
 
-// ===== API：司機接單 =====
-app.post('/api/orders/:id/accept', (req, res) => {
-  const { id } = req.params;
+// 司機接單（注意：路徑改成 /accept，配合前端）
+app.post("/api/orders/:id/accept", (req, res) => {
+  const orderId = Number(req.params.id);
   const { driverId } = req.body;
 
-  const order = orders.find((o) => o.id === id);
-  const driver = drivers.find(
-    (d) => String(d.id) === String(driverId)
-  );
-
-  if (!order || !driver) {
-    return res.status(404).json({ error: '訂單或司機不存在' });
+  const order = orders.find((o) => o.id === orderId);
+  if (!order) {
+    return res.status(404).json({ error: "找不到這筆訂單" });
   }
 
-  order.status = 'accepted';
-  order.driverId = driver.id;
-  driver.status = 'heading';
+  const driver = drivers.find((d) => d.id === driverId);
+  if (!driver) {
+    return res.status(404).json({ error: "找不到這位司機" });
+  }
 
-  console.log(`司機 ${driver.name} 接了訂單 ${order.id}`);
-  res.json({ order, driver });
+  order.driverId = driverId;
+  order.status = "assigned";
+  driver.status = "ontrip";
+
+  // 前端 AuthView / App.jsx 目前期待回傳 { order, driver }
+  res.json({
+    ok: true,
+    order,
+    driver,
+  });
 });
 
-// ===== 靜態檔案：把 React build 出來的 dist 當網站根目錄 =====
-// 靜態檔案：dist
-const distPath = path.join(__dirname, 'dist');
+// ===== API：使用者註冊 / 登入（假資料庫版） =====
+
+// 註冊
+app.post("/api/users/register", (req, res) => {
+  const { role, name, email, password, phone, carPlate } = req.body;
+
+  if (!role || !email || !password) {
+    return res
+      .status(400)
+      .json({ ok: false, message: "role, email, password 必填" });
+  }
+
+  const existed = users.find((u) => u.email === email);
+  if (existed) {
+    return res
+      .status(400)
+      .json({ ok: false, message: "這個 Email 已經註冊過了" });
+  }
+
+  const user = {
+    id: nextUserId++,
+    role, // 'passenger' 或 'driver'
+    name: name || "",
+    email,
+    password, // 目前先純文字，之後可以改成 hash
+    phone: phone || "",
+    carPlate: carPlate || "",
+  };
+
+  users.push(user);
+  console.log("User registered:", user);
+
+  res.json({ ok: true, user });
+});
+
+// 登入
+app.post("/api/users/login", (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res
+      .status(400)
+      .json({ ok: false, message: "email, password 必填" });
+  }
+
+  const user = users.find(
+    (u) => u.email === email && u.password === password
+  );
+
+  if (!user) {
+    return res
+      .status(401)
+      .json({ ok: false, message: "帳號或密碼錯誤" });
+  }
+
+  res.json({ ok: true, user });
+});
+
+// ===== 靜態檔 & SPA fallback =====
+
+// dist 靜態檔
+const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
 
-// SPA fallback：非 /api 開頭的路徑，全部回傳 React 的 index.html
-// 注意：這裡改成「正規表達式」，就不會再出現 Missing parameter name at index 1: * 的錯誤
+// SPA fallback：所有「不是 /api 開頭」的路徑，都回傳 React 的 index.html
+// 這裡用正規表達式，避免 app.get('*') 造成 path-to-regexp 錯誤
 app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
+  res.sendFile(path.join(distPath, "index.html"));
 });
 
+// ===== 啟動伺服器 =====
 
-// ===== 啟動 Server =====
 const PORT = process.env.PORT || 4000;
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server is running on port ${PORT}`);
 });
-
