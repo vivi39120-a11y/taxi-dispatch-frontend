@@ -1,233 +1,27 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SmartDispatch - AI 智慧派遣系統</title>
+  <head>
+    <meta charset="UTF-8" />
+    <title>SmartDispatch - AI 智慧派遣系統</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Bootstrap 5 -->
-  <link
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-    rel="stylesheet"
-  />
+    <!-- 你可以保留字型 / Bootstrap 等，一樣沒問題 -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <!-- 🔴 這個一定要有：React 會掛在這裡 -->
+    <div id="root"></div>
 
-  <!-- Noto Sans TC 字型 -->
-  <link
-    href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap"
-    rel="stylesheet"
-  />
+    <!-- 🔴 這個一定要有：把 React / App.jsx 載進來 -->
+    <script type="module" src="/src/main.jsx"></script>
 
-  <style>
-    body {
-      font-family: "Noto Sans TC", sans-serif;
-    }
-
-    /* 首頁 hero 區塊 */
-    .hero-section {
-      background-image: url("https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?q=80&w=1920&auto=format&fit=crop");
-      background-size: cover;
-      background-position: center;
-      height: 100vh; /* 佔滿整個螢幕高度 */
-      display: flex;
-      align-items: center;
-      position: relative;
-    }
-
-    .hero-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.4);
-      z-index: 1;
-    }
-
-    .hero-content {
-      z-index: 2; /* 確保內容浮在遮罩上面 */
-      width: 100%;
-    }
-
-    /* 仿 Uber 的叫車卡片 */
-    .booking-card {
-      background: white;
-      padding: 30px;
-      border-radius: 12px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-    }
-
-    /* 司機招募區塊背景色 */
-    .driver-section {
-      background-color: #f8f9fa;
-      padding: 80px 0;
-    }
-  </style>
-</head>
-<body id="top">
-  <!-- 導覽列 -->
-  <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
-    <div class="container">
-      <a class="navbar-brand fw-bold" href="#top">SmartDispatch</a>
-      <button
-        class="navbar-toggler"
-        type="button"
-        data-bs-toggle="collapse"
-        data-bs-target="#navbarNav"
-      >
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav ms-auto">
-          <!-- ⭐ 乘客：直接連到 React 乘客端 -->
-          <li class="nav-item">
-            <a
-              class="nav-link active"
-              href="https://taxi-dispatch-frontend-2.onrender.com/?role=passenger"
-            >
-              我是乘客
-            </a>
-          </li>
-
-          <!-- ⭐ 司機：直接連到 React 司機端 -->
-          <li class="nav-item">
-            <a
-              class="nav-link"
-              href="https://taxi-dispatch-frontend-2.onrender.com/?role=driver"
-            >
-              我是司機
-            </a>
-          </li>
-
-          <!-- ⭐ 登入 / 註冊：進入 React 的 Auth 頁 -->
-          <li class="nav-item">
-            <a
-              class="nav-link btn btn-primary text-white ms-2 px-3"
-              href="https://taxi-dispatch-frontend-2.onrender.com/?page=auth"
-            >
-              登入 / 註冊
-            </a>
-          </li>
-        </ul>
-      </div>
-    </div>
-  </nav>
-
-  <!-- 乘客 hero 區塊 -->
-  <section class="hero-section" id="passenger">
-    <div class="hero-overlay"></div>
-    <div class="container hero-content">
-      <div class="row align-items-center">
-        <div class="col-lg-6 text-white mb-5 mb-lg-0">
-          <h1 class="display-4 fw-bold">計程車派遣系統</h1>
-          <p class="lead mb-4">利用大數據分析，讓您不浪費時間等待。</p>
-        </div>
-
-        <div class="col-lg-5 offset-lg-1">
-          <div class="booking-card">
-            <h3 class="fw-bold mb-4">去哪裡？</h3>
-            <form>
-              <div class="mb-3">
-                <label class="form-label text-muted small">上車地點</label>
-                <input
-                  type="text"
-                  class="form-control form-control-lg"
-                  placeholder="輸入上車地址"
-                  value="目前位置"
-                />
-              </div>
-              <div class="mb-3">
-                <label class="form-label text-muted small">下車地點</label>
-                <input
-                  type="text"
-                  class="form-control form-control-lg"
-                  placeholder="輸入目的地"
-                />
-              </div>
-
-              <!-- 之後如果要加預估價格可以在這裡顯示 -->
-              <div id="price-estimate" class="mb-3 d-none">
-                <p class="fw-bold text-success">預估金額：$150 - $180</p>
-              </div>
-
-              <!-- ⭐ 按鈕：也直接送到乘客端 -->
-              <button
-                type="button"
-                class="btn btn-dark w-100 btn-lg py-3 fw-bold"
-                onclick="window.location.href='https://taxi-dispatch-frontend-2.onrender.com/?role=passenger'"
-              >
-                查看價格與車輛
-              </button>
-            </form>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 司機招募區塊 -->
-  <section class="driver-section" id="driver">
-    <div class="container">
-      <div class="row align-items-center">
-        <div class="col-md-6 mb-4 mb-md-0">
-          <img
-            src="https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?q=80&w=800&auto=format&fit=crop"
-            class="img-fluid rounded shadow"
-            alt="Driver App UI"
-          />
-        </div>
-        <div class="col-md-6">
-          <span class="badge bg-warning text-dark mb-2">司機專屬</span>
-          <h2 class="fw-bold mb-3">
-            有預測需求指數
-            <br />
-            不讓你白跑一趟。
-          </h2>
-          <p class="text-muted">
-            我們的 APP 內建 <strong>AI 預測分數系統</strong>：
-          </p>
-
-          <ul class="list-unstyled mt-4">
-            <li class="mb-3">
-              <h5 class="fw-bold">🔥 熱點預測地圖</h5>
-              <p class="small text-muted">
-                地圖顏色深淺代表需求強度，直接導航至高分區域。
-              </p>
-            </li>
-            <li class="mb-3">
-              <h5 class="fw-bold">📈 獲利分數 (Score)</h5>
-              <p class="small text-muted">
-                我們會為每條路線打分數，跟著高分走，空車率降低 30%。
-              </p>
-            </li>
-          </ul>
-
-          <!-- ⭐ 司機按鈕：送到司機端 -->
-          <a
-            href="https://taxi-dispatch-frontend-2.onrender.com/?role=driver"
-            class="btn btn-outline-dark mt-3"
-          >
-            加入司機行列
-          </a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- footer -->
-  <footer class="bg-dark text-white py-5 text-center">
-    <div class="container">
-      <h3 class="mb-4">立即體驗智慧派遣</h3>
-      <div class="d-flex justify-content-center gap-3">
-        <button class="btn btn-light btn-lg">🍎 iOS 下載</button>
-        <button class="btn btn-light btn-lg">🤖 Android 下載</button>
-      </div>
-      <p class="mt-5 text-white-50 small">
-        © 2025 SmartDispatch Project. Department of Computer Science.
-      </p>
-    </div>
-  </footer>
-
-  <!-- Bootstrap JS -->
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
+    <!-- 如果你要在這裡加其他 script 也可以，但要放在這行後面 -->
+  </body>
 </html>
