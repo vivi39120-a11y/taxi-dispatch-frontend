@@ -1,220 +1,127 @@
 // src/LandingPage.jsx
-// 首頁 landing：三個按鈕 → 乘客端 / 司機端 / 登入註冊
+import React from "react";
+import "./App.css"; // 用現有的樣式檔
 
-// 直接用 JS 物件寫原本的 CSS（hero 區塊）
-const heroSectionStyle = {
-  backgroundImage:
-    'url("https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?q=80&w=1920&auto=format&fit=crop")',
-  backgroundSize: "cover",
-  backgroundPosition: "center",
-  minHeight: "100vh",
-  display: "flex",
-  alignItems: "center",
-  position: "relative",
-};
-
-const heroOverlayStyle = {
-  position: "absolute",
-  top: 0,
-  left: 0,
-  width: "100%",
-  height: "100%",
-  background: "rgba(0,0,0,0.4)",
-  zIndex: 1,
-};
-
-const heroContentStyle = {
-  position: "relative",
-  zIndex: 2,
-  width: "100%",
-};
-
-const bookingCardStyle = {
-  background: "#ffffff",
-  padding: "30px",
-  borderRadius: "12px",
-  boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
-};
-
-const driverSectionStyle = {
-  backgroundColor: "#f8f9fa",
-  padding: "80px 0",
-};
-
-function LandingPage({ onGoPassenger, onGoDriver, onGoAuth }) {
+export default function LandingPage({ onEnterWebApp }) {
   return (
-    <div id="top">
-      {/* 導覽列 */}
-      <nav className="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
-        <div className="container">
-          <a className="navbar-brand fw-bold" href="#top">
-            SmartDispatch
-          </a>
-
-          <button
-            className="navbar-toggler"
-            type="button"
-            data-bs-toggle="collapse"
-            data-bs-target="#navbarNav"
-          >
-            <span className="navbar-toggler-icon" />
-          </button>
-
-          <div className="collapse navbar-collapse" id="navbarNav">
-            <ul className="navbar-nav ms-auto">
-              {/* 我是乘客 → 切到乘客端地圖 */}
-              <li className="nav-item">
-                <button
-                  type="button"
-                  className="nav-link btn btn-link text-white"
-                  onClick={onGoPassenger}
-                >
-                  我是乘客
-                </button>
-              </li>
-
-              {/* 我是司機 → 切到司機端地圖 */}
-              <li className="nav-item">
-                <button
-                  type="button"
-                  className="nav-link btn btn-link text-white"
-                  onClick={onGoDriver}
-                >
-                  我是司機
-                </button>
-              </li>
-
-              {/* 登入 / 註冊 → 切到 AuthPage */}
-              <li className="nav-item">
-                <button
-                  type="button"
-                  className="nav-link btn btn-primary text-white ms-2 px-3"
-                  onClick={onGoAuth}
-                >
-                  登入 / 註冊
-                </button>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </nav>
-
-      {/* 乘客 hero 區塊 */}
-      <section style={heroSectionStyle} id="passenger">
-        <div style={heroOverlayStyle} />
-        <div className="container" style={heroContentStyle}>
-          <div className="row align-items-center">
-            <div className="col-lg-6 text-white mb-5 mb-lg-0">
-              <h1 className="display-4 fw-bold">計程車派遣系統</h1>
-              <p className="lead mb-4">利用大數據分析，讓您不浪費時間等待。</p>
-            </div>
-
-            <div className="col-lg-5 offset-lg-1">
-              <div style={bookingCardStyle}>
-                <h3 className="fw-bold mb-4">去哪裡？</h3>
-                <form>
-                  <div className="mb-3">
-                    <label className="form-label text-muted small">上車地點</label>
-                    <input
-                      type="text"
-                      className="form-control form-control-lg"
-                      placeholder="輸入上車地址"
-                      defaultValue="目前位置"
-                    />
-                  </div>
-                  <div className="mb-3">
-                    <label className="form-label text-muted small">下車地點</label>
-                    <input
-                      type="text"
-                      className="form-control form-control-lg"
-                      placeholder="輸入目的地"
-                    />
-                  </div>
-
-                  {/* 之後要顯示預估價格可以把這段打開 */}
-                  {/* <div className="mb-3">
-                    <p className="fw-bold text-success">預估金額：$150 - $180</p>
-                  </div> */}
-
-                  {/* 查看價格與車輛 → 直接進乘客端地圖 */}
-                  <button
-                    type="button"
-                    className="btn btn-dark w-100 btn-lg py-3 fw-bold"
-                    onClick={onGoPassenger}
-                  >
-                    查看價格與車輛
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* 司機招募區塊 */}
-      <section style={driverSectionStyle} id="driver">
-        <div className="container">
-          <div className="row align-items-center">
-            <div className="col-md-6 mb-4 mb-md-0">
-              <img
-                src="https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?q=80&w=800&auto=format&fit=crop"
-                className="img-fluid rounded shadow"
-                alt="Driver App UI"
-              />
-            </div>
-            <div className="col-md-6">
-              <span className="badge bg-warning text-dark mb-2">司機專屬</span>
-              <h2 className="fw-bold mb-3">
-                有預測需求指數
-                <br />
-                不讓你白跑一趟。
-              </h2>
-              <p className="text-muted">
-                我們的 APP 內建 <strong>AI 預測分數系統</strong>：
-              </p>
-
-              <ul className="list-unstyled mt-4">
-                <li className="mb-3">
-                  <h5 className="fw-bold">🔥 熱點預測地圖</h5>
-                  <p className="small text-muted">
-                    地圖顏色深淺代表需求強度，直接導航至高分區域。
-                  </p>
-                </li>
-                <li className="mb-3">
-                  <h5 className="fw-bold">📈 獲利分數 (Score)</h5>
-                  <p className="small text-muted">
-                    我們會為每條路線打分數，跟著高分走，空車率降低 30%。
-                  </p>
-                </li>
-              </ul>
-
-              <button
-                type="button"
-                className="btn btn-outline-dark mt-3"
-                onClick={onGoDriver}
-              >
-                加入司機行列
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* footer */}
-      <footer className="bg-dark text-white py-5 text-center">
-        <div className="container">
-          <h3 className="mb-4">立即體驗智慧派遣</h3>
-          <div className="d-flex justify-content-center gap-3">
-            <button className="btn btn-light btn-lg">🍎 iOS 下載</button>
-            <button className="btn btn-light btn-lg">🤖 Android 下載</button>
-          </div>
-          <p className="mt-5 text-white-50 small">
-            © 2025 SmartDispatch Project. Department of Computer Science.
+    <div className="landing-root">
+      {/* Hero 區 */}
+      <header className="landing-hero">
+        <div className="landing-hero-text">
+          <h1>SmartTaxi 智慧派車系統</h1>
+          <p className="landing-subtitle">
+            一鍵叫車，乘客與司機雙端協作，搭配 1–10 分派遣適合度，幫你找到最合適的車。
           </p>
+
+          <div className="landing-hero-buttons">
+            <button className="btn primary" onClick={onEnterWebApp}>
+              立即叫車（Web 版）
+            </button>
+            <a
+              className="btn ghost"
+              href="https://example.com/passenger-app"
+              target="_blank"
+              rel="noreferrer"
+            >
+              下載乘客端 Passenger App
+            </a>
+            <a
+              className="btn ghost"
+              href="https://example.com/driver-app"
+              target="_blank"
+              rel="noreferrer"
+            >
+              下載司機端 Driver App
+            </a>
+          </div>
         </div>
+
+        <div className="landing-hero-panel">
+          <div className="mini-card">
+            <h3>派遣分數預覽</h3>
+            <p>以距離為主，為每一筆訂單計算 1–10 分適合度。</p>
+            <ul>
+              <li>司機 A · 距離 0.8 km · 分數 <strong>9.5</strong></li>
+              <li>司機 B · 距離 1.6 km · 分數 <strong>7.8</strong></li>
+              <li>司機 C · 距離 3.1 km · 分數 <strong>5.2</strong></li>
+            </ul>
+            <p className="mini-note">分數越高越適合接這筆訂單。</p>
+          </div>
+        </div>
+      </header>
+
+      {/* 功能卡片區 */}
+      <section className="landing-section">
+        <h2>為什麼選擇 SmartTaxi？</h2>
+        <div className="card-grid">
+          <div className="feature-card">
+            <h3>隨時隨地叫車</h3>
+            <p>
+              不管在 PC 或手機，只要打開網站或 App，輸入上車地點與目的地，即可一鍵叫車。
+            </p>
+          </div>
+          <div className="feature-card">
+            <h3>乘客端 & 司機端雙 App</h3>
+            <p>
+              乘客建立訂單、司機選擇要接的訂單，雙端透過同一個雲端後端即時同步。
+            </p>
+          </div>
+          <div className="feature-card">
+            <h3>派遣適合度分數</h3>
+            <p>
+              以距離為基礎，為每一筆訂單計算 1–10
+              分分數，協助系統與司機快速找到最適合的車。
+            </p>
+          </div>
+          <div className="feature-card">
+            <h3>即時地圖與路線</h3>
+            <p>
+              乘客可以看到司機即時位置與行車路線，司機則能看到最佳前往路徑與預估時間。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* 流程說明區 */}
+      <section className="landing-section dark">
+        <h2>系統如何運作？</h2>
+        <ol className="flow-list">
+          <li>乘客在網站或 App 輸入上車地點與目的地，送出叫車需求。</li>
+          <li>系統搜尋附近空車，為每一台車計算 1–10 分派遣適合度（先以距離為主）。</li>
+          <li>將最適合的車推薦給司機與乘客，司機可以選擇是否接單。</li>
+          <li>司機接單後，乘客可即時看到車輛位置與預估抵達時間，直至行程完成。</li>
+        </ol>
+      </section>
+
+      {/* 下載區 */}
+      <section className="landing-section">
+        <h2>立即下載 App，開始你的行程</h2>
+        <p className="center-text">
+          SmartTaxi 支援 iOS / Android 與 Web，之後只要更新下面的下載連結，就能讓任何人安裝使用。
+        </p>
+        <div className="download-buttons">
+          <a
+            className="btn primary"
+            href="https://example.com/passenger-app"
+            target="_blank"
+            rel="noreferrer"
+          >
+            乘客端 Passenger App 下載
+          </a>
+          <a
+            className="btn outline"
+            href="https://example.com/driver-app"
+            target="_blank"
+            rel="noreferrer"
+          >
+            司機端 Driver App 下載
+          </a>
+        </div>
+      </section>
+
+      <footer className="landing-footer">
+        <p>© {new Date().getFullYear()} SmartTaxi Dispatch System. All rights reserved.</p>
       </footer>
     </div>
   );
 }
-
-export default LandingPage;

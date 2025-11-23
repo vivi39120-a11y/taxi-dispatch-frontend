@@ -1,113 +1,80 @@
-// src/i18n.js
-
-export const LANGS = {
-  zh: '中文',
-  en: 'English',
-  ko: '한국어',
-  ja: '日本語',
-};
-
-export const DEFAULT_LANG = 'zh';
+export const languages = ['zh', 'en', 'ko', 'ja']
 
 export const translations = {
   zh: {
-    // 共用
-    subtitle: '同一個前端模擬 乘客端 / 司機端 即時連動',
-    riderTab: '乘客端',
-    driverTab: '司機端',
-    languageLabel: '語言',
-
-    // Landing / 介紹用（如果有用得到）
-    landingTitle: '計程車派遣系統',
-    landingDesc: '利用大數據分析，讓您不浪費時間等待。',
-    landingPassengerBtn: '我是乘客',
-    landingDriverBtn: '我是司機',
-    landingAuthBtn: '登入 / 註冊',
-
-    // Auth 頁面
-    authTitle: '登入 / 註冊',
-    authLoginTab: '登入',
-    authRegisterTab: '註冊',
-    authEmailLabel: 'Email',
-    authPasswordLabel: '密碼',
-    authLoginButton: '登入',
-    authRegisterButton: '註冊',
-    authHint:
-      '（目前使用記憶體假資料庫，重新啟動伺服器後帳號會消失）',
+    appTitle: 'NY Taxi Demo',
+    passengerMode: '乘客端',
+    driverMode: '司機端',
+    language: '語言',
+    pickupPlaceholder: '上車地點（例如：Times Square）',
+    dropoffPlaceholder: '目的地（例如：Central Park）',
+    requestRide: '叫車',
+    requesting: '送出中...',
+    ordersTitlePassenger: '我的訂單',
+    ordersTitleDriver: '待接訂單',
+    noOrders: '目前沒有訂單',
+    statusPending: '等待司機接單',
+    statusAssigned: '已派遣司機',
+    driverSelectLabel: '選擇目前司機',
+    acceptOrder: '接單',
+    refresh: '重新整理'
   },
-
   en: {
-    subtitle:
-      'Single frontend simulating both rider & driver views in real time',
-    riderTab: 'Rider',
-    driverTab: 'Driver',
-    languageLabel: 'Language',
-
-    landingTitle: 'Taxi Dispatch System',
-    landingDesc:
-      'Use data intelligence to reduce your waiting time.',
-    landingPassengerBtn: 'I am a rider',
-    landingDriverBtn: 'I am a driver',
-    landingAuthBtn: 'Sign in / Sign up',
-
-    authTitle: 'Sign in / Sign up',
-    authLoginTab: 'Sign in',
-    authRegisterTab: 'Sign up',
-    authEmailLabel: 'Email',
-    authPasswordLabel: 'Password',
-    authLoginButton: 'Sign in',
-    authRegisterButton: 'Sign up',
-    authHint:
-      '(Using in-memory demo database; all accounts will be lost after server restart.)',
+    appTitle: 'NY Taxi Demo',
+    passengerMode: 'Passenger',
+    driverMode: 'Driver',
+    language: 'Language',
+    pickupPlaceholder: 'Pickup (e.g. Times Square)',
+    dropoffPlaceholder: 'Dropoff (e.g. Central Park)',
+    requestRide: 'Request Ride',
+    requesting: 'Requesting...',
+    ordersTitlePassenger: 'My Orders',
+    ordersTitleDriver: 'Pending Orders',
+    noOrders: 'No orders yet',
+    statusPending: 'Waiting for driver',
+    statusAssigned: 'Driver assigned',
+    driverSelectLabel: 'Select current driver',
+    acceptOrder: 'Accept',
+    refresh: 'Refresh'
   },
-
   ko: {
-    subtitle:
-      '하나의 프론트엔드에서 승객 / 기사 화면을 실시간으로 시뮬레이션',
-    riderTab: '승객 화면',
-    driverTab: '기사 화면',
-    languageLabel: '언어',
-
-    landingTitle: '택시 배차 시스템',
-    landingDesc:
-      '데이터 분석으로 기다리는 시간을 줄여 줍니다.',
-    landingPassengerBtn: '승객입니다',
-    landingDriverBtn: '기사입니다',
-    landingAuthBtn: '로그인 / 회원가입',
-
-    authTitle: '로그인 / 회원가입',
-    authLoginTab: '로그인',
-    authRegisterTab: '회원가입',
-    authEmailLabel: '이메일',
-    authPasswordLabel: '비밀번호',
-    authLoginButton: '로그인',
-    authRegisterButton: '회원가입',
-    authHint:
-      '(현재 메모리 기반 데모 DB를 사용 중이며, 서버가 재시작되면 계정이 삭제됩니다.)',
+    appTitle: 'NY Taxi Demo',
+    passengerMode: '승객',
+    driverMode: '기사',
+    language: '언어',
+    pickupPlaceholder: '승차 위치 (예: 타임스퀘어)',
+    dropoffPlaceholder: '목적지 (예: 센트럴파크)',
+    requestRide: '호출하기',
+    requesting: '요청 중...',
+    ordersTitlePassenger: '나의 주문',
+    ordersTitleDriver: '대기 중인 주문',
+    noOrders: '주문이 없습니다',
+    statusPending: '기사 대기 중',
+    statusAssigned: '기사 배정됨',
+    driverSelectLabel: '현재 기사 선택',
+    acceptOrder: '수락',
+    refresh: '새로고침'
   },
-
   ja: {
-    subtitle:
-      '1つのフロントエンドで 乗客 / ドライバー画面をリアルタイムにシミュレート',
-    riderTab: '乗客画面',
-    driverTab: 'ドライバー画面',
-    languageLabel: '言語',
+    appTitle: 'NY Taxi Demo',
+    passengerMode: '乗客',
+    driverMode: 'ドライバー',
+    language: '言語',
+    pickupPlaceholder: '乗車場所（例：タイムズスクエア）',
+    dropoffPlaceholder: '目的地（例：セントラルパーク）',
+    requestRide: '配車を呼ぶ',
+    requesting: '送信中...',
+    ordersTitlePassenger: '自分の注文',
+    ordersTitleDriver: '未処理の注文',
+    noOrders: '注文はありません',
+    statusPending: 'ドライバー待ち',
+    statusAssigned: 'ドライバー確定',
+    driverSelectLabel: '現在のドライバーを選択',
+    acceptOrder: '受注',
+    refresh: '再読み込み'
+  }
+}
 
-    landingTitle: 'タクシー配車システム',
-    landingDesc:
-      'データ分析により待ち時間を短縮します。',
-    landingPassengerBtn: '乗客として利用する',
-    landingDriverBtn: 'ドライバーとして利用する',
-    landingAuthBtn: 'ログイン / 登録',
-
-    authTitle: 'ログイン / 登録',
-    authLoginTab: 'ログイン',
-    authRegisterTab: '新規登録',
-    authEmailLabel: 'メールアドレス',
-    authPasswordLabel: 'パスワード',
-    authLoginButton: 'ログイン',
-    authRegisterButton: '登録',
-    authHint:
-      '（現在はメモリ上のデモ用データベースを使用しており、サーバー再起動後はアカウントが削除されます。）',
-  },
-};
+export function t(lang, key) {
+  return translations[lang]?.[key] ?? key
+}

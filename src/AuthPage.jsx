@@ -3,131 +3,145 @@ import { useState } from "react";
 
 const API_BASE = "/api";
 
-export default function AuthPage({ onSuccess }) {
+function AuthPage({ onBack }) {
   const [mode, setMode] = useState("login"); // 'login' or 'register'
-  const [role, setRole] = useState("passenger");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
-
-  const isRegister = mode === "register";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!username || !password) {
+      alert("請輸入帳號與密碼");
+      return;
+    }
+    if (mode === "register" && password !== confirm) {
+      alert("兩次輸入的密碼不一致");
+      return;
+    }
+
     setLoading(true);
-
     try {
-      const url =
-        mode === "register"
-          ? `${API_BASE}/users/register`
-          : `${API_BASE}/users/login`;
-
-      const body =
-        mode === "register"
-          ? { role, name, email, password }
-          : { email, password };
-
-      const res = await fetch(url, {
+      const res = await fetch(`${API_BASE}/auth/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ username, password }),
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error || "發生錯誤");
+      if (!res.ok || !data.success) {
+        alert(data.message || (mode === "login" ? "登入失敗" : "註冊失敗"));
         return;
       }
 
-      const user = data.user;
-      if (onSuccess) onSuccess(user);
+      if (mode === "login") {
+        alert("登入成功！");
+      } else {
+        alert("註冊成功，請切換到『登入』使用。");
+      }
     } catch (err) {
       console.error("auth error", err);
-      alert("連線發生錯誤");
+      alert("伺服器錯誤，請稍後再試。");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
-        <div className="auth-tabs">
-          <button
-            className={mode === "login" ? "active" : ""}
-            onClick={() => setMode("login")}
-          >
-            登入
-          </button>
-          <button
-            className={mode === "register" ? "active" : ""}
-            onClick={() => setMode("register")}
-          >
-            註冊
+    <div className="auth-page-root">
+      <header className="uber-dispatch-topbar">
+        <div className="topbar-left">
+          <div className="brand-row">
+            <span className="brand-dot" />
+            <span className="brand-text">NY Taxi Demo</span>
+          </div>
+          <div className="brand-sub">
+            帳號登入 / 註冊（目前資料暫存於伺服器記憶體）
+          </div>
+        </div>
+        <div className="topbar-right">
+          <button type="button" className="topbar-link" onClick={onBack}>
+            回首頁
           </button>
         </div>
+      </header>
 
-        <form onSubmit={handleSubmit}>
-          {isRegister && (
-            <>
-              <div className="auth-field">
-                <label>身分</label>
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                >
-                  <option value="passenger">乘客</option>
-                  <option value="driver">司機</option>
-                </select>
-              </div>
+      <main className="auth-page-main">
+        <div className="auth-card">
+          <div className="auth-tabs">
+            <button
+              type="button"
+              className={
+                "auth-tab-btn" + (mode === "login" ? " active" : "")
+              }
+              onClick={() => setMode("login")}
+            >
+              登入
+            </button>
+            <button
+              type="button"
+              className={
+                "auth-tab-btn" + (mode === "register" ? " active" : "")
+              }
+              onClick={() => setMode("register")}
+            >
+              註冊
+            </button>
+          </div>
 
-              <div className="auth-field">
-                <label>名稱</label>
+          <form className="auth-form" onSubmit={handleSubmit}>
+            <div className="mb-3">
+              <label className="form-label">帳號</label>
+              <input
+                type="text"
+                className="form-control"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+            </div>
+
+            <div className="mb-3">
+              <label className="form-label">密碼</label>
+              <input
+                type="password"
+                className="form-control"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+
+            {mode === "register" && (
+              <div className="mb-3">
+                <label className="form-label">再次輸入密碼</label>
                 <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required={isRegister}
+                  type="password"
+                  className="form-control"
+                  autoComplete="new-password"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
                 />
               </div>
-            </>
-          )}
+            )}
 
-          <div className="auth-field">
-            <label>Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
+            <button
+              type="submit"
+              className="btn btn-dark w-100 py-2 mt-2"
+              disabled={loading}
+            >
+              {loading ? "處理中..." : mode === "login" ? "登入" : "註冊"}
+            </button>
+          </form>
 
-          <div className="auth-field">
-            <label>密碼</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-
-          <button className="auth-submit" type="submit" disabled={loading}>
-            {loading
-              ? "處理中..."
-              : isRegister
-              ? "建立帳號並進入系統"
-              : "登入"}
-          </button>
-        </form>
-
-        <p className="auth-hint">
-          （目前使用記憶體假資料庫，重新啟動伺服器後帳號會消失）
-        </p>
-      </div>
+          <p className="auth-hint small text-muted mt-3">
+            ※ 目前使用記憶體假資料庫，Render 伺服器重新啟動後帳號會被清空。
+          </p>
+        </div>
+      </main>
     </div>
   );
 }
+
+export default AuthPage;
