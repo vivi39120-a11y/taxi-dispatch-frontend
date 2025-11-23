@@ -1,7 +1,7 @@
-// src/views/LandingPage.jsx
-import { useNavigate } from "react-router-dom";
+// src/LandingPage.jsx
+// 首頁 landing：三個按鈕 → 乘客端 / 司機端 / 登入註冊
 
-// 直接用 inline style 還原原本的 CSS
+// 直接用 JS 物件寫原本的 CSS（hero 區塊）
 const heroSectionStyle = {
   backgroundImage:
     'url("https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?q=80&w=1920&auto=format&fit=crop")',
@@ -41,24 +41,7 @@ const driverSectionStyle = {
   padding: "80px 0",
 };
 
-function LandingPage() {
-  const navigate = useNavigate();
-
-  const goPassenger = () => {
-    // 進到地圖，預設乘客端
-    navigate("/app?role=passenger");
-  };
-
-  const goDriver = () => {
-    // 進到地圖，預設司機端
-    navigate("/app?role=driver");
-  };
-
-  const goAuth = () => {
-    // 進到登入 / 註冊頁
-    navigate("/auth");
-  };
-
+function LandingPage({ onGoPassenger, onGoDriver, onGoAuth }) {
   return (
     <div id="top">
       {/* 導覽列 */}
@@ -67,6 +50,7 @@ function LandingPage() {
           <a className="navbar-brand fw-bold" href="#top">
             SmartDispatch
           </a>
+
           <button
             className="navbar-toggler"
             type="button"
@@ -78,34 +62,34 @@ function LandingPage() {
 
           <div className="collapse navbar-collapse" id="navbarNav">
             <ul className="navbar-nav ms-auto">
-              {/* 我是乘客 */}
+              {/* 我是乘客 → 切到乘客端地圖 */}
               <li className="nav-item">
                 <button
                   type="button"
                   className="nav-link btn btn-link text-white"
-                  onClick={goPassenger}
+                  onClick={onGoPassenger}
                 >
                   我是乘客
                 </button>
               </li>
 
-              {/* 我是司機 */}
+              {/* 我是司機 → 切到司機端地圖 */}
               <li className="nav-item">
                 <button
                   type="button"
                   className="nav-link btn btn-link text-white"
-                  onClick={goDriver}
+                  onClick={onGoDriver}
                 >
                   我是司機
                 </button>
               </li>
 
-              {/* 登入 / 註冊 */}
+              {/* 登入 / 註冊 → 切到 AuthPage */}
               <li className="nav-item">
                 <button
                   type="button"
                   className="nav-link btn btn-primary text-white ms-2 px-3"
-                  onClick={goAuth}
+                  onClick={onGoAuth}
                 >
                   登入 / 註冊
                 </button>
@@ -122,9 +106,7 @@ function LandingPage() {
           <div className="row align-items-center">
             <div className="col-lg-6 text-white mb-5 mb-lg-0">
               <h1 className="display-4 fw-bold">計程車派遣系統</h1>
-              <p className="lead mb-4">
-                利用大數據分析，讓您不浪費時間等待。
-              </p>
+              <p className="lead mb-4">利用大數據分析，讓您不浪費時間等待。</p>
             </div>
 
             <div className="col-lg-5 offset-lg-1">
@@ -132,9 +114,7 @@ function LandingPage() {
                 <h3 className="fw-bold mb-4">去哪裡？</h3>
                 <form>
                   <div className="mb-3">
-                    <label className="form-label text-muted small">
-                      上車地點
-                    </label>
+                    <label className="form-label text-muted small">上車地點</label>
                     <input
                       type="text"
                       className="form-control form-control-lg"
@@ -143,9 +123,7 @@ function LandingPage() {
                     />
                   </div>
                   <div className="mb-3">
-                    <label className="form-label text-muted small">
-                      下車地點
-                    </label>
+                    <label className="form-label text-muted small">下車地點</label>
                     <input
                       type="text"
                       className="form-control form-control-lg"
@@ -158,10 +136,11 @@ function LandingPage() {
                     <p className="fw-bold text-success">預估金額：$150 - $180</p>
                   </div> */}
 
+                  {/* 查看價格與車輛 → 直接進乘客端地圖 */}
                   <button
                     type="button"
                     className="btn btn-dark w-100 btn-lg py-3 fw-bold"
-                    onClick={goPassenger}
+                    onClick={onGoPassenger}
                   >
                     查看價格與車輛
                   </button>
@@ -212,7 +191,7 @@ function LandingPage() {
               <button
                 type="button"
                 className="btn btn-outline-dark mt-3"
-                onClick={goDriver}
+                onClick={onGoDriver}
               >
                 加入司機行列
               </button>
