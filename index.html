@@ -44,7 +44,7 @@
     }
 
     .hero-content {
-      z-index: 2;
+      z-index: 2; /* 確保內容浮在遮罩上面 */
       width: 100%;
     }
 
@@ -78,7 +78,7 @@
       </button>
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav ms-auto">
-          <!-- ⭐ 乘客：連到 React 乘客端 -->
+          <!-- ⭐ 乘客：直接連到 React 乘客端 -->
           <li class="nav-item">
             <a
               class="nav-link active"
@@ -88,7 +88,7 @@
             </a>
           </li>
 
-          <!-- ⭐ 司機：連到 React 司機端 -->
+          <!-- ⭐ 司機：直接連到 React 司機端 -->
           <li class="nav-item">
             <a
               class="nav-link"
@@ -98,7 +98,7 @@
             </a>
           </li>
 
-          <!-- ⭐ 登入 / 註冊：連到 React 的登入頁 -->
+          <!-- ⭐ 登入 / 註冊：進入 React 的 Auth 頁 -->
           <li class="nav-item">
             <a
               class="nav-link btn btn-primary text-white ms-2 px-3"
@@ -144,11 +144,12 @@
                 />
               </div>
 
+              <!-- 之後如果要加預估價格可以在這裡顯示 -->
               <div id="price-estimate" class="mb-3 d-none">
                 <p class="fw-bold text-success">預估金額：$150 - $180</p>
               </div>
 
-              <!-- ⭐ 直接送去乘客端 -->
+              <!-- ⭐ 按鈕：也直接送到乘客端 -->
               <button
                 type="button"
                 class="btn btn-dark w-100 btn-lg py-3 fw-bold"
@@ -200,7 +201,7 @@
             </li>
           </ul>
 
-          <!-- ⭐ 直接送到司機端 -->
+          <!-- ⭐ 司機按鈕：送到司機端 -->
           <a
             href="https://taxi-dispatch-frontend-2.onrender.com/?role=driver"
             class="btn btn-outline-dark mt-3"
