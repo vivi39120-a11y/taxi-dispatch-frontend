@@ -79,14 +79,27 @@
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav ms-auto">
           <li class="nav-item">
-            <a class="nav-link active" href="#passenger">我是乘客</a>
+            <!-- 乘客：連到乘客端 -->
+            <a
+              class="nav-link active"
+              href="https://taxi-dispatch-frontend-2.onrender.com/?role=passenger"
+              >我是乘客</a
+            >
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="#driver">我是司機</a>
+            <!-- 司機：連到司機端 -->
+            <a
+              class="nav-link"
+              href="https://taxi-dispatch-frontend-2.onrender.com/?role=driver"
+              >我是司機</a
+            >
           </li>
           <li class="nav-item">
-            <!-- 這裡之後可以改成連到你的 React 派車系統 -->
-            <a class="nav-link btn btn-primary text-white ms-2 px-3" href="#">
+            <!-- 登入 / 註冊：進入 Auth 頁面 -->
+            <a
+              class="nav-link btn btn-primary text-white ms-2 px-3"
+              href="https://taxi-dispatch-frontend-2.onrender.com/?page=auth"
+            >
               登入 / 註冊
             </a>
           </li>
@@ -135,6 +148,7 @@
               <button
                 type="button"
                 class="btn btn-dark w-100 btn-lg py-3 fw-bold"
+                onclick="window.location.href='https://taxi-dispatch-frontend-2.onrender.com/?role=passenger'"
               >
                 查看價格與車輛
               </button>
@@ -182,7 +196,12 @@
             </li>
           </ul>
 
-          <a href="#" class="btn btn-outline-dark mt-3">加入司機行列</a>
+          <!-- 司機 CTA：連到司機端 -->
+          <a
+            href="https://taxi-dispatch-frontend-2.onrender.com/?role=driver"
+            class="btn btn-outline-dark mt-3"
+            >加入司機行列</a
+          >
         </div>
       </div>
     </div>
