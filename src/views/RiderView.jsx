@@ -1,215 +1,121 @@
 // src/views/RiderView.jsx
-import { useState } from 'react';
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  Polyline,
-} from 'react-leaflet';
-import { passengerIcon, carIcon } from '../mapIcons';
+import { useState } from 'react'
+import MapView from '../components/MapView.jsx'
+import OrderList from '../components/OrderList.jsx'
 
-function RiderView({
-  center,
-  places,
+export default function RiderView({
+  lang,
   drivers,
-  orders,
-  myOrderId,
-  onCreateOrder,
-  t,
+  orders,              // 這裡拿到的是「目前乘客」自己的訂單（App.jsx 已經有過濾）
+  ordersWithLocations, // 同一批訂單，但加上 pickupLocation / dropoffLocation，用來畫地圖
+  loading,
+  error,
+  createOrder,
+  refresh,
+  currentUser,
 }) {
-  const [pickupId, setPickupId] = useState(places[0]?.id);
-  const [dropoffId, setDropoffId] = useState(places[1]?.id);
+  const [pickup, setPickup] = useState('')
+  const [dropoff, setDropoff] = useState('')
 
-  const myOrder = orders.find((o) => o.id === myOrderId) || null;
-
-  // 如果訂單已被司機接單 → 算路線 + ETA
-  let route = [];
-  let etaText = '';
-  if (myOrder && myOrder.driverId) {
-    const driver = drivers.find((d) => d.id === myOrder.driverId);
-    if (driver) {
-      const pickup = myOrder.pickup;
-      const dropoff = myOrder.dropoff;
-
-      route = [
-        [driver.lat, driver.lng],
-        [pickup.lat, pickup.lng],
-        [dropoff.lat, dropoff.lng],
-      ];
-
-      const dist =
-        distanceKm(
-          { lat: driver.lat, lng: driver.lng },
-          pickup
-        ) + distanceKm(pickup, dropoff);
-
-      const speedKmh = 30;
-      const etaMin = Math.round((dist / speedKmh) * 60);
-      const distText = dist.toFixed(1);
-
-      // 用各語言的句子組合 ETA
-      etaText = `${t.etaPrefix} ${distText} ${
-        t.etaUnitKm
-      }，${t.etaSuffixMin.replace('{min}', etaMin)}`;
+  const handleCreateOrder = () => {
+    if (!pickup.trim() || !dropoff.trim()) {
+      alert('請輸入上車地點與目的地')
+      return
     }
+    // 呼叫 App 裡面的 createOrder（會寫到後端 & 更新 orders）
+    createOrder(pickup.trim(), dropoff.trim())
+    // 下單後只清空目的地（上車地點很多人會重複用同一個）
+    setDropoff('')
   }
 
-  const mapCenter = route.length ? route[0] : center;
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (pickupId === dropoffId) {
-      alert('上車地點與目的地不能相同');
-      return;
-    }
-    onCreateOrder({ pickupId, dropoffId });
-  };
-
   return (
-    <div className="role-view">
-      {/* 上半部：地圖 */}
-      <div className="uber-dispatch-map">
-        <MapContainer
-          center={mapCenter}
-          zoom={13}
-          scrollWheelZoom={true}
-          className="map-container"
-        >
-          <TileLayer
-            attribution="&copy; OpenStreetMap contributors"
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+    <section className="map-section">
+      {/* 左邊地圖 */}
+      <div className="map-wrapper">
+        <MapView
+          drivers={drivers}              // MapView 內部會依照訂單 driverId 過濾
+          orders={ordersWithLocations}   // 有座標的版本，拿來畫上車點 / 目的地
+          mode="passenger"               // 乘客端模式：只顯示接到自己訂單的那一台車
+        />
+      </div>
+
+      {/* 右邊操作面板 */}
+      <aside className="side-panel">
+        <div className="panel-inner">
+          <h1 className="panel-title">乘客端</h1>
+
+          {/* 目前登入的乘客 */}
+          <div className="field-label">目前乘客：</div>
+          <div className="current-driver-box">
+            {currentUser?.username || '尚未登入'}
+          </div>
+
+          {/* 上車地點輸入 */}
+          <div className="field-label" style={{ marginTop: 24 }}>
+            上車地點（例如：Times Square）
+          </div>
+          <input
+            className="text-input"
+            type="text"
+            placeholder="輸入上車地點"
+            value={pickup}
+            onChange={e => setPickup(e.target.value)}
           />
 
-          {/* 訂單的上車 / 下車點 */}
-          {myOrder && (
-            <>
-              {/* 上車：小人圖示 */}
-              <Marker
-                position={[myOrder.pickup.lat, myOrder.pickup.lng]}
-                icon={passengerIcon}
+          {/* 目的地輸入 */}
+          <div className="field-label" style={{ marginTop: 16 }}>
+            目的地（例如：Central Park）
+          </div>
+          <input
+            className="text-input"
+            type="text"
+            placeholder="輸入目的地"
+            value={dropoff}
+            onChange={e => setDropoff(e.target.value)}
+          />
+
+          {/* 叫車按鈕 */}
+          <button
+            type="button"
+            className="primary-btn"
+            style={{ marginTop: 24, width: '100%' }}
+            onClick={handleCreateOrder}
+            disabled={
+              loading || !currentUser || currentUser.role !== 'passenger'
+            }
+          >
+            叫車
+          </button>
+
+          {/* 我的訂單列表 */}
+          <section className="orders-block" style={{ marginTop: 32 }}>
+            <div className="orders-header">
+              <h3>我的訂單</h3>
+              <button
+                className="ghost-btn"
+                type="button"
+                onClick={refresh}
+                disabled={loading}
               >
-                <Popup>
-                  {t.pickupLabel}：{myOrder.pickup.name}
-                </Popup>
-              </Marker>
-
-              {/* 目的地：預設藍色 marker */}
-              <Marker
-                position={[
-                  myOrder.dropoff.lat,
-                  myOrder.dropoff.lng,
-                ]}
-              >
-                <Popup>
-                  {t.dropoffLabel}：{myOrder.dropoff.name}
-                </Popup>
-              </Marker>
-            </>
-          )}
-
-          {/* 司機 & 路線 */}
-          {myOrder &&
-            myOrder.driverId &&
-            drivers
-              .filter((d) => d.id === myOrder.driverId)
-              .map((driver) => (
-                <Marker
-                  key={driver.id}
-                  position={[driver.lat, driver.lng]}
-                  icon={carIcon}
-                >
-                  <Popup>
-                    {t.mapDriverLabel}：{driver.name}
-                  </Popup>
-                </Marker>
-              ))}
-
-          {route.length > 1 && (
-            <Polyline
-              positions={route}
-              pathOptions={{ color: '#22c55e', weight: 5 }}
-            />
-          )}
-        </MapContainer>
-      </div>
-
-      {/* 下半部：Uber 風 bottom sheet */}
-      <div className="uber-dispatch-sheet">
-        <div className="sheet-handle" />
-        <div className="sheet-inner">
-          <h2>{t.riderTitle}</h2>
-
-          {/* 叫車表單 */}
-          <form onSubmit={handleSubmit} className="rider-form">
-            <label>
-              {t.pickupLabel}
-              <select
-                value={pickupId}
-                onChange={(e) => setPickupId(e.target.value)}
-              >
-                {places.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              {t.dropoffLabel}
-              <select
-                value={dropoffId}
-                onChange={(e) => setDropoffId(e.target.value)}
-              >
-                {places.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <button type="submit">{t.requestRideButton}</button>
-          </form>
-
-          {/* 訂單狀態 */}
-          {myOrder && (
-            <div className="rider-status">
-              <div>
-                {t.orderIdLabel}：{myOrder.id}
-              </div>
-              <div>
-                {t.statusLabel}：
-                {myOrder.status === 'pending'
-                  ? t.waitingDriver
-                  : t.driverAccepted}
-              </div>
-              {etaText && <div>{etaText}</div>}
+                重新整理
+              </button>
             </div>
-          )}
+
+            <OrderList
+              orders={orders}
+              drivers={drivers}
+              // 乘客端：不傳 isDriverView，所以不會顯示「接單」按鈕
+            />
+
+            {loading && (
+              <div className="auth-hint" style={{ marginTop: 8 }}>
+                更新中…
+              </div>
+            )}
+            {error && <div className="error-box">{error}</div>}
+          </section>
         </div>
-      </div>
-    </div>
-  );
+      </aside>
+    </section>
+  )
 }
-
-// Haversine 距離
-function distanceKm(a, b) {
-  const R = 6371;
-  const dLat = (b.lat - a.lat) * (Math.PI / 180);
-  const dLng = (b.lng - a.lng) * (Math.PI / 180);
-  const lat1 = a.lat * (Math.PI / 180);
-  const lat2 = b.lat * (Math.PI / 180);
-
-  const sinDLat = Math.sin(dLat / 2);
-  const sinDLng = Math.sin(dLng / 2);
-
-  const aa =
-    sinDLat * sinDLat +
-    Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
-  const c = 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
-  return R * c;
-}
-
-export default RiderView;

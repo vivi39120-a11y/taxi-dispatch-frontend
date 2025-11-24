@@ -1,262 +1,487 @@
 // src/App.jsx
-import { useEffect, useState } from 'react';
-import RiderView from './views/RiderView';
-import DriverView from './views/DriverView';
-import { translations, LANGS, DEFAULT_LANG } from './i18n';
-import './App.css';
+import { useEffect, useMemo, useState } from 'react'
+import './App.css'
+import { languages, t } from './i18n'
+import RiderView from './views/RiderView.jsx'
+import DriverView from './views/DriverView.jsx'
+import AuthPage from './views/AuthPage.jsx'
+import LandingPage from './LandingPage.jsx'
+import { resolveLocation } from './locationResolver.js'
 
-// 🔹 API 位址：自動用現在網址的 host
-const API_BASE = '/api';
+// 從網址判斷一開始顯示乘客端 / 司機端 / 首頁
+function getInitialModeFromUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const role = params.get('role')
+  if (role === 'driver') return 'driver'
+  if (role === 'passenger') return 'rider'
+  return 'rider'
+}
 
-// 紐約中心點
-const NYC_CENTER = [40.758, -73.9855];
+function getInitialShowLandingFromUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const role = params.get('role')
+  return role ? false : true
+}
 
-// 固定幾個地點（上車 / 目的地選單用）
-const PLACES = [
-  { id: 'ts', name: 'Times Square', lat: 40.758, lng: -73.9855 },
-  { id: 'cp', name: 'Central Park', lat: 40.7812, lng: -73.9665 },
-  { id: 'ws', name: 'Wall Street', lat: 40.706, lng: -74.009 },
-  {
-    id: 'bbp',
-    name: 'Brooklyn Bridge Park',
-    lat: 40.7003,
-    lng: -73.9967,
-  },
-];
+export default function App() {
+  const [lang, setLang] = useState('zh')
+  const [mode, setMode] = useState(getInitialModeFromUrl)
+  const [showLanding, setShowLanding] = useState(getInitialShowLandingFromUrl)
+  const [showAuth, setShowAuth] = useState(false)
 
-const VIEW = {
-  RIDER: 'rider',
-  DRIVER: 'driver',
-};
+  // 帳號（存在前端就好）
+  const [users, setUsers] = useState([]) // {username, password, role}
+  const [currentUser, setCurrentUser] = useState(null) // {username, role}
 
-function App() {
-  // 🔹 目前是乘客端還是司機端（預設 null：先讓使用者選）
-  const [role, setRole] = useState(null);
+  // 司機 / 訂單
+  const [drivers, setDrivers] = useState([]) // [{id,name,lat,lng,status}]
+  const [orders, setOrders] = useState([]) // [{id,pickup,...}]
 
-  // 共用狀態：司機 + 訂單（從 API 來）
-  const [drivers, setDrivers] = useState([]);
-  const [orders, setOrders] = useState([]);
+  const [currentDriverId, setCurrentDriverId] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [simulateVehicles, setSimulateVehicles] = useState(true)
 
-  // 這個瀏覽器視角的「我的訂單 / 我是哪個司機」
-  const [myOrderId, setMyOrderId] = useState(null);
-  const [currentDriverId, setCurrentDriverId] = useState(null);
+  // ===== 從 API 抓資料 =====
+  const fetchAll = async () => {
+    try {
+      setError('')
+      const [dRes, oRes] = await Promise.all([
+        fetch('/api/drivers'),
+        fetch('/api/orders'),
+      ])
+      if (!dRes.ok || !oRes.ok) throw new Error('API error')
 
-  // 語言
-  const [lang, setLang] = useState(DEFAULT_LANG);
-  const t = translations[lang];
+      const dData = await dRes.json()
+      const oData = await oRes.json()
+      setDrivers(dData)
+      setOrders(oData)
+    } catch (err) {
+      console.error(err)
+      setError('目前無法連線到伺服器，請稍後再試。')
+    }
+  }
 
-  // 🔹 從後端抓 orders + drivers，並每 2 秒更新一次（假即時）
   useEffect(() => {
-    const fetchAll = async () => {
-      try {
-        const [ordersRes, driversRes] = await Promise.all([
-          fetch(`${API_BASE}/orders`),
-          fetch(`${API_BASE}/drivers`),
-        ]);
-        const [ordersData, driversData] = await Promise.all([
-          ordersRes.json(),
-          driversRes.json(),
-        ]);
+    fetchAll()
+    const timer = setInterval(fetchAll, 3000) // 每 3 秒同步一次
+    return () => clearInterval(timer)
+  }, [])
 
-        setOrders(ordersData);
-        setDrivers(driversData);
+  // ===== 訂單 + 座標 =====
+  const ordersWithLocations = useMemo(
+    () =>
+      orders.map(o => ({
+        ...o,
+        pickupLocation: resolveLocation(o.pickup),
+        dropoffLocation: resolveLocation(o.dropoff),
+      })),
+    [orders]
+  )
 
-        // 如果還沒選司機，就預設第一個
-        if (!currentDriverId && driversData.length > 0) {
-          setCurrentDriverId(String(driversData[0].id));
-        }
-      } catch (err) {
-        console.error('抓 orders/drivers 失敗', err);
-      }
-    };
+  const passengerOrders = useMemo(() => {
+    if (!currentUser || currentUser.role !== 'passenger') return []
+    return orders.filter(o => o.customer === currentUser.username)
+  }, [orders, currentUser])
 
-    fetchAll();
-    const id = setInterval(fetchAll, 2000); // 每 2 秒重新抓
-    return () => clearInterval(id);
-  }, [currentDriverId]);
+  const passengerOrdersWithLoc = useMemo(
+    () =>
+      passengerOrders.map(o => ({
+        ...o,
+        pickupLocation: resolveLocation(o.pickup),
+        dropoffLocation: resolveLocation(o.dropoff),
+      })),
+    [passengerOrders]
+  )
 
-  // 乘客建立訂單 → 呼叫後端 API
-  const handleCreateOrder = async ({ pickupId, dropoffId }) => {
-    const pickup = PLACES.find((p) => p.id === pickupId);
-    const dropoff = PLACES.find((p) => p.id === dropoffId);
-    if (!pickup || !dropoff) return;
+  const driverOrdersWithLoc = ordersWithLocations
 
-    try {
-      const res = await fetch(`${API_BASE}/orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pickup, dropoff }),
-      });
-      const created = await res.json();
-
-      // 先自己加進來（不用等 2 秒後的輪詢）
-      setOrders((prev) => [...prev, created]);
-      setMyOrderId(created.id);
-    } catch (err) {
-      console.error('建立訂單失敗', err);
-      alert('建立訂單失敗');
+  // ===== 乘客下單 =====
+  const createOrder = async (pickup, dropoff) => {
+    if (!pickup.trim() || !dropoff.trim()) return
+    if (!currentUser || currentUser.role !== 'passenger') {
+      alert('請先以乘客身分登入')
+      return
     }
-  };
 
-  // 司機接單 → 呼叫後端 API
-  const handleDriverAccept = async (orderId, driverId) => {
+    setLoading(true)
+    setError('')
     try {
-      const res = await fetch(`${API_BASE}/orders/${orderId}/accept`, {
+      const res = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ driverId }),
-      });
-      const data = await res.json();
-      if (!data.order) {
-        console.error('接單 API 回傳錯誤', data);
-        return;
+        body: JSON.stringify({
+          pickup,
+          dropoff,
+          customer: currentUser.username,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `HTTP ${res.status}`)
       }
+      const order = await res.json()
+      setOrders(prev => [...prev, order])
+    } catch (err) {
+      console.error(err)
+      setError('下單失敗，請稍後再試。')
+    } finally {
+      setLoading(false)
+    }
+  }
 
-      const updatedOrder = data.order;
-      const updatedDriver = data.driver;
+  // ===== 司機接單 =====
+  const acceptOrder = async orderId => {
+    if (!currentUser || currentUser.role !== 'driver') {
+      alert('請先以司機身分登入')
+      return
+    }
+    if (!currentDriverId) {
+      alert('尚未綁定司機車輛，請重新登入司機或稍後再試')
+      return
+    }
 
-      // 先樂觀更新一下
-      setOrders((prev) =>
-        prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o))
-      );
-      if (updatedDriver) {
-        setDrivers((prev) =>
-          prev.map((d) =>
-            String(d.id) === String(updatedDriver.id) ? updatedDriver : d
+    const driverNameLabel = currentUser.username
+
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/orders/${orderId}/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          driverId: currentDriverId,
+          driverName: driverNameLabel,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `HTTP ${res.status}`)
+      }
+      const updatedOrder = await res.json()
+      setOrders(prev =>
+        prev.map(o => (o.id === updatedOrder.id ? updatedOrder : o))
+      )
+      setDrivers(prev =>
+        prev.map(d =>
+          d.id === updatedOrder.driverId ? { ...d, status: 'busy' } : d
+        )
+      )
+    } catch (err) {
+      console.error(err)
+      setError('接單失敗，請稍後再試。')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // ===== 司機登入後建立自己的車 =====
+  const attachDriverForUser = async user => {
+    if (!user || user.role !== 'driver') return
+
+    try {
+      const res = await fetch('/api/driver-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: user.username }),
+      })
+      if (!res.ok) throw new Error('driver-login failed')
+      const driver = await res.json()
+      setCurrentDriverId(driver.id)
+      setDrivers(prev => {
+        const exists = prev.some(d => d.id === driver.id)
+        return exists ? prev : [...prev, driver]
+      })
+    } catch (err) {
+      console.error(err)
+      setError('無法建立司機車輛，請稍後再試。')
+    }
+  }
+
+  // ===== 司機端：只移動「自己那台車」 =====
+  useEffect(() => {
+    if (!simulateVehicles) return
+    if (!currentUser || currentUser.role !== 'driver') return
+    if (!currentDriverId) return
+
+    const SPEED = 0.01
+    const EPSILON = 0.002
+
+    const timer = setInterval(() => {
+      setDrivers(prevDrivers => {
+        const idx = prevDrivers.findIndex(d => d.id === currentDriverId)
+        if (idx === -1) return prevDrivers
+
+        const myDriver = prevDrivers[idx]
+
+        const myOrder = driverOrdersWithLoc.find(
+          o => o.status === 'assigned' && o.driverId === currentDriverId
+        )
+        if (!myOrder) return prevDrivers
+
+        const { pickupLocation, dropoffLocation } = myOrder
+        if (!pickupLocation && !dropoffLocation) return prevDrivers
+
+        let lat = myDriver.lat
+        let lng = myDriver.lng
+        let targetLat
+        let targetLng
+
+        if (pickupLocation && dropoffLocation) {
+          const distToPickup = Math.hypot(
+            pickupLocation.lat - lat,
+            pickupLocation.lng - lng
           )
-        );
-      }
-    } catch (err) {
-      console.error('接單失敗', err);
-      alert('接單失敗');
+
+          if (distToPickup > EPSILON) {
+            targetLat = pickupLocation.lat
+            targetLng = pickupLocation.lng
+          } else {
+            targetLat = dropoffLocation.lat
+            targetLng = dropoffLocation.lng
+          }
+        } else if (pickupLocation) {
+          targetLat = pickupLocation.lat
+          targetLng = pickupLocation.lng
+        } else {
+          targetLat = dropoffLocation.lat
+          targetLng = dropoffLocation.lng
+        }
+
+        const dx = targetLat - lat
+        const dy = targetLng - lng
+        const dist = Math.hypot(dx, dy)
+
+        if (dist > 0) {
+          const step = Math.min(SPEED, dist)
+          lat += (dx / dist) * step
+          lng += (dy / dist) * step
+        }
+
+        const newDrivers = [...prevDrivers]
+        newDrivers[idx] = { ...myDriver, lat, lng }
+
+        fetch(`/api/drivers/${currentDriverId}/location`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat, lng }),
+        }).catch(() => {})
+
+        return newDrivers
+      })
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [simulateVehicles, currentUser, currentDriverId, driverOrdersWithLoc])
+
+  // ===== Auth：註冊 / 登入 =====
+  const registerUser = ({ username, password, role }) => {
+    if (users.some(u => u.username === username)) {
+      return { ok: false, message: '此帳號已被註冊，請改用其他帳號或直接登入。' }
     }
-  };
 
-  const handleLangChange = (e) => {
-    setLang(e.target.value);
-  };
+    const newUser = { username, password, role }
+    setUsers(prev => [...prev, newUser])
+    setCurrentUser(newUser)
 
-  // 🔹 第一次要先選「乘客 / 司機」的畫面
-  const renderRoleSelect = () => {
+    if (role === 'driver') {
+      setMode('driver')
+      attachDriverForUser(newUser)
+    } else {
+      setMode('rider')
+    }
+
+    setShowAuth(false)
+    setShowLanding(false)
+    return { ok: true }
+  }
+
+  const loginUser = ({ username, password }) => {
+    const user = users.find(u => u.username === username)
+    if (!user) {
+      return { ok: false, message: '查無此帳號，請先註冊。' }
+    }
+    if (user.password !== password) {
+      return { ok: false, message: '密碼錯誤，請再試一次。' }
+    }
+
+    setCurrentUser(user)
+    if (user.role === 'driver') {
+      setMode('driver')
+      attachDriverForUser(user)
+    } else {
+      setMode('rider')
+    }
+
+    setShowAuth(false)
+    setShowLanding(false)
+    return { ok: true }
+  }
+
+  // ===== 共用 props =====
+  const baseProps = {
+    lang,
+    drivers,
+    loading,
+    error,
+    currentDriverId,
+    setCurrentDriverId,
+    createOrder,
+    acceptOrder,
+    refresh: fetchAll,
+    currentUser,
+  }
+
+  // ===== 首頁 / Auth =====
+  if (showLanding) {
     return (
-      <div className="role-select-wrapper">
-        <div className="role-select-card">
-          <h2>{t.chooseRoleTitle ?? '請選擇使用模式'}</h2>
-          <p className="role-select-sub">
-            {t.chooseRoleSub ??
-              '你可以選擇以乘客或司機身分使用系統，選擇後只會看到對應的畫面。'}
-          </p>
-          <div className="role-select-buttons">
+      <LandingPage
+        onPassengerClick={() => {
+          setMode('rider')
+          setShowLanding(false)
+        }}
+        onDriverClick={() => {
+          setMode('driver')
+          setShowLanding(false)
+        }}
+        onAuthClick={() => {
+          setShowAuth(true)
+          setShowLanding(false)
+        }}
+      />
+    )
+  }
+
+  if (showAuth) {
+    return (
+      <div className="app-root">
+        <header className="top-bar">
+          <div className="top-bar-left">
+            <span className="app-title">NY Taxi Demo</span>
+          </div>
+
+          <div className="top-bar-center" />
+
+          <div className="top-bar-right">
+            {currentUser && (
+              <span className="header-user-label">
+                {currentUser.role === 'driver'
+                  ? `司機：${currentUser.username}`
+                  : `乘客：${currentUser.username}`}
+              </span>
+            )}
+
             <button
-              className="role-btn passenger"
-              onClick={() => setRole(VIEW.RIDER)}
+              type="button"
+              className="header-back-btn"
+              onClick={() => {
+                window.location.href = '/'
+              }}
             >
-              {t.riderTab ?? '乘客 Passenger'}
+              回首頁
             </button>
+
+            <div className="lang-switch">
+              <span className="lang-label">語言：</span>
+              <select value={lang} onChange={e => setLang(e.target.value)}>
+                <option value="zh">ZH</option>
+                <option value="en">EN</option>
+                <option value="ko">KO</option>
+                <option value="ja">JA</option>
+              </select>
+            </div>
+
             <button
-              className="role-btn driver"
-              onClick={() => setRole(VIEW.DRIVER)}
+              type="button"
+              className="sim-toggle-btn"
+              onClick={() => setSimulateVehicles(v => !v)}
             >
-              {t.driverTab ?? '司機 Driver'}
+              {simulateVehicles ? '停止車輛模擬' : '啟動車輛模擬'}
             </button>
           </div>
-        </div>
+        </header>
+
+        <main className="auth-main">
+          <AuthPage
+            onBack={() => {
+              setShowAuth(false)
+              setShowLanding(true)
+            }}
+            onRegister={registerUser}
+            onLogin={loginUser}
+          />
+        </main>
       </div>
-    );
-  };
+    )
+  }
 
+  // ===== 主畫面（這裡已經把「乘客/司機切換按鈕」拿掉）=====
   return (
-    <div className="uber-dispatch-root">
-      {/* 上方 bar：品牌 + 目前模式 + 語言切換 */}
-      <header className="uber-dispatch-topbar">
-        <div className="topbar-left">
-          <div className="brand-row">
-            <span className="brand-dot" />
-            <span className="brand-text">NY Taxi Demo</span>
-          </div>
-          <div className="brand-sub">
-            {t.subtitle ?? '乘客端 / 司機端 透過同一個後端即時連動'}
-          </div>
-        </div>
+    <div className="app-root">
+      <header className="app-header">
+        <div className="app-title">NY Taxi Demo</div>
 
-        <div className="topbar-center">
-          {role === VIEW.RIDER && (
-            <div className="current-role-label">
-              {t.riderTab ?? '乘客端 Passenger'}
-            </div>
+        <div className="app-header-controls">
+          {/* 顯示目前登入身分：乘客：xxx 或 司機：yyy */}
+          {currentUser && (
+            <span className="header-user-label">
+              {currentUser.role === 'driver'
+                ? `司機：${currentUser.username}`
+                : `乘客：${currentUser.username}`}
+            </span>
           )}
-          {role === VIEW.DRIVER && (
-            <div className="current-role-label">
-              {t.driverTab ?? '司機端 Driver'}
-            </div>
-          )}
-          {role === null && (
-            <div className="current-role-label">
-              {t.chooseRoleShort ?? '請先選擇乘客或司機'}
-            </div>
-          )}
-        </div>
 
-        <div className="topbar-right">
-          <label className="lang-pill">
-            {(t.languageLabel ?? '語言') + '：'}
-            <select value={lang} onChange={handleLangChange}>
-              {Object.entries(LANGS).map(([code, label]) => (
+          {/* 回首頁按鈕 */}
+          <button
+            className="header-back-btn"
+            type="button"
+            onClick={() => {
+              window.location.href = '/'
+            }}
+            style={{ marginLeft: 8 }}
+          >
+            回首頁
+          </button>
+
+          {/* 語言切換 */}
+          <div className="lang-select" style={{ marginLeft: 16 }}>
+            <span className="lang-label">{t(lang, 'language')}：</span>
+            <select value={lang} onChange={e => setLang(e.target.value)}>
+              {languages.map(code => (
                 <option key={code} value={code}>
-                  {label}
+                  {code.toUpperCase()}
                 </option>
               ))}
             </select>
-          </label>
+          </div>
 
-          {/* 方便你測試，如果不想讓使用者切換，可以把這整個 button 刪掉 */}
-          {role && (
-            <button
-              className="switch-role-btn"
-              onClick={() => {
-                setRole(null);
-                setMyOrderId(null);
-                setCurrentDriverId(null);
-              }}
-            >
-              {t.switchRole ?? '切換模式'}
-            </button>
-          )}
+          {/* 車輛模擬開關 */}
+          <button
+            className="ghost-btn"
+            type="button"
+            onClick={() => setSimulateVehicles(v => !v)}
+            style={{ marginLeft: 8 }}
+          >
+            {simulateVehicles ? '停止車輛模擬' : '啟動車輛模擬'}
+          </button>
         </div>
       </header>
 
-      {/* 主畫面 */}
-      <div className="uber-dispatch-main">
-        {/* 還沒選角色 → 顯示選擇畫面 */}
-        {role === null && renderRoleSelect()}
-
-        {/* 只顯示其中一端 */}
-        {role === VIEW.RIDER && (
+      <main className="app-main">
+        {mode === 'rider' ? (
           <RiderView
-            center={NYC_CENTER}
-            places={PLACES}
-            drivers={drivers}
-            orders={orders}
-            myOrderId={myOrderId}
-            onCreateOrder={handleCreateOrder}
-            t={t}
+            {...baseProps}
+            orders={passengerOrders}
+            ordersWithLocations={passengerOrdersWithLoc}
           />
-        )}
-
-        {role === VIEW.DRIVER && (
+        ) : (
           <DriverView
-            center={NYC_CENTER}
-            drivers={drivers}
+            {...baseProps}
             orders={orders}
-            currentDriverId={currentDriverId}
-            setCurrentDriverId={setCurrentDriverId}
-            onAcceptOrder={handleDriverAccept}
-            t={t}
+            ordersWithLocations={driverOrdersWithLoc}
           />
         )}
-      </div>
+      </main>
     </div>
-  );
+  )
 }
-
-export default App;

@@ -1,19 +1,12 @@
-// src/mapIcons.js
-import L from 'leaflet';
+import L from 'leaflet'
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
+import markerIcon from 'leaflet/dist/images/marker-icon.png'
+import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 
-// 乘客上車點：小人
-export const passengerIcon = L.divIcon({
-  className:
-    'leaflet-div-icon custom-marker custom-marker-passenger',
-  html: '🧍',          // 這裡用 emoji，之後要換成圖片也可以
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-});
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow
+})
 
-// 車輛位置：小車
-export const carIcon = L.divIcon({
-  className: 'leaflet-div-icon custom-marker custom-marker-car',
-  html: '🚗',
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-});
+export default L
