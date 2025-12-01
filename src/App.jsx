@@ -29,7 +29,8 @@ export default function App() {
   const [showLanding, setShowLanding] = useState(getInitialShowLandingFromUrl)
   const [showAuth, setShowAuth] = useState(false)
 
-  // 帳號（存在前端就好）
+// 帳號（存在前端就好）
+// users: { username, password, role, carType? }
   const [users, setUsers] = useState([]) // {username, password, role}
   const [currentUser, setCurrentUser] = useState(null) // {username, role}
 
@@ -68,67 +69,96 @@ export default function App() {
     return () => clearInterval(timer)
   }, [])
 
-  // ===== 訂單 + 座標 =====
+  // ===== 訂單 + 座標（優先使用 server 給的經緯度）=====
   const ordersWithLocations = useMemo(
     () =>
-      orders.map(o => ({
-        ...o,
-        pickupLocation: resolveLocation(o.pickup),
-        dropoffLocation: resolveLocation(o.dropoff),
-      })),
+      orders.map(o => {
+        const pickupLocation =
+          typeof o.pickupLat === 'number' &&
+          typeof o.pickupLng === 'number'
+            ? { lat: o.pickupLat, lng: o.pickupLng }
+            : resolveLocation(o.pickup)
+
+        const dropoffLocation =
+          typeof o.dropoffLat === 'number' &&
+          typeof o.dropoffLng === 'number'
+            ? { lat: o.dropoffLat, lng: o.dropoffLng }
+            : resolveLocation(o.dropoff)
+
+        return {
+          ...o,
+          pickupLocation,
+          dropoffLocation,
+        }
+      }),
     [orders]
   )
 
+  // 目前登入乘客自己的訂單（不含座標）
   const passengerOrders = useMemo(() => {
     if (!currentUser || currentUser.role !== 'passenger') return []
     return orders.filter(o => o.customer === currentUser.username)
   }, [orders, currentUser])
 
-  const passengerOrdersWithLoc = useMemo(
-    () =>
-      passengerOrders.map(o => ({
-        ...o,
-        pickupLocation: resolveLocation(o.pickup),
-        dropoffLocation: resolveLocation(o.dropoff),
-      })),
-    [passengerOrders]
-  )
+  // 目前登入乘客自己的訂單 + 座標（直接從 ordersWithLocations 過濾，不再重算）
+  const passengerOrdersWithLoc = useMemo(() => {
+    if (!currentUser || currentUser.role !== 'passenger') return []
+    return ordersWithLocations.filter(
+      o => o.customer === currentUser.username
+    )
+  }, [ordersWithLocations, currentUser])
 
+  // 司機端直接用全部訂單＋座標
   const driverOrdersWithLoc = ordersWithLocations
 
-  // ===== 乘客下單 =====
-  const createOrder = async (pickup, dropoff) => {
-    if (!pickup.trim() || !dropoff.trim()) return
-    if (!currentUser || currentUser.role !== 'passenger') {
-      alert('請先以乘客身分登入')
-      return
-    }
+  // ===== 乘客下單（吃 geocode 經緯度）=====
+  // pickup / dropoff：顯示用文字
+  // pickupLoc / dropoffLoc：{lat, lng}
+// 只貼「乘客下單」那一段，其他保持你現在的版本
 
-    setLoading(true)
-    setError('')
-    try {
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pickup,
-          dropoff,
-          customer: currentUser.username,
-        }),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || `HTTP ${res.status}`)
-      }
-      const order = await res.json()
-      setOrders(prev => [...prev, order])
-    } catch (err) {
-      console.error(err)
-      setError('下單失敗，請稍後再試。')
-    } finally {
-      setLoading(false)
-    }
+// ===== 乘客下單 =====
+// ===== 乘客下單 =====
+const createOrder = async (pickup, dropoff, pickupLoc, dropoffLoc, fareInfo) => {
+  if (!pickup.trim() || !dropoff.trim()) return
+  if (!currentUser || currentUser.role !== 'passenger') {
+    alert('請先以乘客身分登入')
+    return
   }
+
+  setLoading(true)
+  setError('')
+  try {
+    const res = await fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pickup,
+        dropoff,
+        customer: currentUser.username,
+        pickupLat: pickupLoc?.lat ?? null,
+        pickupLng: pickupLoc?.lng ?? null,
+        dropoffLat: dropoffLoc?.lat ?? null,
+        dropoffLng: dropoffLoc?.lng ?? null,
+        vehicleType: fareInfo?.vehicleType || null,
+        distanceKm: fareInfo?.distanceKm ?? null,
+        estimatedPrice: fareInfo?.price ?? null,
+      }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || `HTTP ${res.status}`)
+    }
+    const order = await res.json()
+    setOrders(prev => [...prev, order])
+  } catch (err) {
+    console.error(err)
+    setError('下單失敗，請稍後再試。')
+  } finally {
+    setLoading(false)
+  }
+}
+
+
 
   // ===== 司機接單 =====
   const acceptOrder = async orderId => {
@@ -177,26 +207,30 @@ export default function App() {
 
   // ===== 司機登入後建立自己的車 =====
   const attachDriverForUser = async user => {
-    if (!user || user.role !== 'driver') return
+  if (!user || user.role !== 'driver') return
 
-    try {
-      const res = await fetch('/api/driver-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: user.username }),
-      })
-      if (!res.ok) throw new Error('driver-login failed')
-      const driver = await res.json()
-      setCurrentDriverId(driver.id)
-      setDrivers(prev => {
-        const exists = prev.some(d => d.id === driver.id)
-        return exists ? prev : [...prev, driver]
-      })
-    } catch (err) {
-      console.error(err)
-      setError('無法建立司機車輛，請稍後再試。')
-    }
+  try {
+    const res = await fetch('/api/driver-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: user.username,
+        carType: user.carType || 'Yellow',
+      }),
+    })
+    if (!res.ok) throw new Error('driver-login failed')
+    const driver = await res.json()
+    setCurrentDriverId(driver.id)
+    setDrivers(prev => {
+      const exists = prev.some(d => d.id === driver.id)
+      return exists ? prev : [...prev, driver]
+    })
+  } catch (err) {
+    console.error(err)
+    setError('無法建立司機車輛，請稍後再試。')
   }
+}
+
 
   // ===== 司機端：只移動「自己那台車」 =====
   useEffect(() => {
@@ -234,9 +268,11 @@ export default function App() {
           )
 
           if (distToPickup > EPSILON) {
+            // 還沒到上車點，先去接客人
             targetLat = pickupLocation.lat
             targetLng = pickupLocation.lng
           } else {
+            // 到了上車點，再往目的地跑
             targetLat = dropoffLocation.lat
             targetLng = dropoffLocation.lng
           }
@@ -261,6 +297,7 @@ export default function App() {
         const newDrivers = [...prevDrivers]
         newDrivers[idx] = { ...myDriver, lat, lng }
 
+        // 把最新座標回寫到 server，讓乘客那邊地圖也更新
         fetch(`/api/drivers/${currentDriverId}/location`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -275,26 +312,33 @@ export default function App() {
   }, [simulateVehicles, currentUser, currentDriverId, driverOrdersWithLoc])
 
   // ===== Auth：註冊 / 登入 =====
-  const registerUser = ({ username, password, role }) => {
-    if (users.some(u => u.username === username)) {
-      return { ok: false, message: '此帳號已被註冊，請改用其他帳號或直接登入。' }
-    }
-
-    const newUser = { username, password, role }
-    setUsers(prev => [...prev, newUser])
-    setCurrentUser(newUser)
-
-    if (role === 'driver') {
-      setMode('driver')
-      attachDriverForUser(newUser)
-    } else {
-      setMode('rider')
-    }
-
-    setShowAuth(false)
-    setShowLanding(false)
-    return { ok: true }
+const registerUser = ({ username, password, role, carType }) => {
+  if (users.some(u => u.username === username)) {
+    return { ok: false, message: '此帳號已被註冊，請改用其他帳號或直接登入。' }
   }
+
+  const newUser = {
+    username,
+    password,
+    role,
+    carType: role === 'driver' ? carType : null,
+  }
+
+  setUsers(prev => [...prev, newUser])
+  setCurrentUser(newUser)
+
+  if (role === 'driver') {
+    setMode('driver')
+    attachDriverForUser(newUser)
+  } else {
+    setMode('rider')
+  }
+
+  setShowAuth(false)
+  setShowLanding(false)
+  return { ok: true }
+}
+
 
   const loginUser = ({ username, password }) => {
     const user = users.find(u => u.username === username)
@@ -415,7 +459,7 @@ export default function App() {
     )
   }
 
-  // ===== 主畫面（這裡已經把「乘客/司機切換按鈕」拿掉）=====
+  // ===== 主畫面 =====
   return (
     <div className="app-root">
       <header className="app-header">

@@ -1,31 +1,273 @@
 // src/views/RiderView.jsx
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import MapView from '../components/MapView.jsx'
 import OrderList from '../components/OrderList.jsx'
+import { t } from '../i18n'   // ✅ 接 i18n
 
 export default function RiderView({
   lang,
   drivers,
-  orders,              // 這裡拿到的是「目前乘客」自己的訂單（App.jsx 已經有過濾）
-  ordersWithLocations, // 同一批訂單，但加上 pickupLocation / dropoffLocation，用來畫地圖
+  orders,               // 目前乘客自己的訂單（App.jsx 已經有過濾）
+  ordersWithLocations,  // 有座標的版本，拿來畫地圖
   loading,
   error,
-  createOrder,
+  createOrder,          // (pickup, dropoff, pickupLoc, dropoffLoc, pricing)
   refresh,
   currentUser,
 }) {
-  const [pickup, setPickup] = useState('')
-  const [dropoff, setDropoff] = useState('')
+  // 文字輸入
+  const [pickupText, setPickupText] = useState('')
+  const [dropoffText, setDropoffText] = useState('')
 
-  const handleCreateOrder = () => {
-    if (!pickup.trim() || !dropoff.trim()) {
+  // geocode 建議 & 選中的座標
+  const [pickupSuggestions, setPickupSuggestions] = useState([])
+  const [dropoffSuggestions, setDropoffSuggestions] = useState([])
+  const [pickupLoc, setPickupLoc] = useState(null)     // {lat, lng}
+  const [dropoffLoc, setDropoffLoc] = useState(null)   // {lat, lng}
+
+  // ✅ 選單「鎖定」旗標（已選好，不再查詢）
+  const [pickupLocked, setPickupLocked] = useState(false)
+  const [dropoffLocked, setDropoffLocked] = useState(false)
+
+  // 預估價格結果
+  const [fareOptions, setFareOptions] = useState(null) // [{type,label,price}]
+  const [fareError, setFareError] = useState('')
+  const [lastDistanceKm, setLastDistanceKm] = useState(null)
+  const [selectedVehicle, setSelectedVehicle] = useState(null)
+
+  // ===== 小工具：呼叫一次 geocode，拿第一筆結果 =====
+  async function geocodeOnce(text) {
+    if (!text || !text.trim()) return null
+    const res = await fetch(`/api/geocode?q=${encodeURIComponent(text.trim())}`)
+    if (!res.ok) return null
+    const data = await res.json()
+    if (!Array.isArray(data) || data.length === 0) return null
+    const first = data[0]
+    return { lat: first.lat, lng: first.lng }
+  }
+
+  // ===== 小工具：算兩點距離（km，haversine）=====
+  function distanceKm(a, b) {
+    const toRad = d => (d * Math.PI) / 180
+    const R = 6371 // 地球半徑 km
+    const dLat = toRad(b.lat - a.lat)
+    const dLng = toRad(b.lng - a.lng)
+    const la1 = toRad(a.lat)
+    const la2 = toRad(b.lat)
+
+    const s =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(la1) * Math.cos(la2) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2)
+
+    const c = 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s))
+    return R * c
+  }
+
+  // ===== 上車地點：打字 → call /api/geocode 拿建議 =====
+  useEffect(() => {
+    if (pickupLocked) {
+      setPickupSuggestions([])
+      return
+    }
+
+    if (!pickupText || pickupText.length < 2) {
+      setPickupSuggestions([])
+      return
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/geocode?q=${encodeURIComponent(pickupText)}`,
+          { signal: controller.signal }
+        )
+        if (!res.ok) return
+        const data = await res.json()
+        setPickupSuggestions(data || [])
+      } catch {
+        // 忽略錯誤
+      }
+    }, 400)
+
+    return () => {
+      clearTimeout(timeoutId)
+      controller.abort()
+    }
+  }, [pickupText, pickupLocked])
+
+  // ===== 目的地：打字 → call /api/geocode 拿建議 =====
+  useEffect(() => {
+    if (dropoffLocked) {
+      setDropoffSuggestions([])
+      return
+    }
+
+    if (!dropoffText || dropoffText.length < 2) {
+      setDropoffSuggestions([])
+      return
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/geocode?q=${encodeURIComponent(dropoffText)}`,
+          { signal: controller.signal }
+        )
+        if (!res.ok) return
+        const data = await res.json()
+        setDropoffSuggestions(data || [])
+      } catch {
+        // 忽略錯誤
+      }
+    }, 400)
+
+    return () => {
+      clearTimeout(timeoutId)
+      controller.abort()
+    }
+  }, [dropoffText, dropoffLocked])
+
+  // 使用者點選一個上車建議
+  const handleSelectPickup = item => {
+    setPickupText(item.label)
+    setPickupLoc({ lat: item.lat, lng: item.lng })
+    setPickupSuggestions([])
+    setPickupLocked(true)           // ✅ 鎖定：不再出現清單
+
+    // 地址變了 → 清掉舊的價格結果
+    setFareOptions(null)
+    setFareError('')
+    setLastDistanceKm(null)
+    setSelectedVehicle(null)
+  }
+
+  // 使用者點選一個目的地建議
+  const handleSelectDropoff = item => {
+    setDropoffText(item.label)
+    setDropoffLoc({ lat: item.lat, lng: item.lng })
+    setDropoffSuggestions([])
+    setDropoffLocked(true)
+
+    setFareOptions(null)
+    setFareError('')
+    setLastDistanceKm(null)
+    setSelectedVehicle(null)
+  }
+
+  // ===== 第一步：只算距離 + 顯示可選車種，不下單 =====
+  const handleCheckPrice = async () => {
+    if (!pickupText.trim() || !dropoffText.trim()) {
       alert('請輸入上車地點與目的地')
       return
     }
-    // 呼叫 App 裡面的 createOrder（會寫到後端 & 更新 orders）
-    createOrder(pickup.trim(), dropoff.trim())
-    // 下單後只清空目的地（上車地點很多人會重複用同一個）
-    setDropoff('')
+    if (!currentUser || currentUser.role !== 'passenger') {
+      alert('請先以乘客身分登入')
+      return
+    }
+
+    setFareError('')
+    setFareOptions(null)
+    setLastDistanceKm(null)
+    setSelectedVehicle(null)
+
+    try {
+      // 1) 取得精準座標（沒選清單也會自動 geocode）
+      let pLoc = pickupLoc
+      let dLoc = dropoffLoc
+
+      if (!pLoc) {
+        pLoc = await geocodeOnce(pickupText)
+        setPickupLoc(pLoc)
+      }
+      if (!dLoc) {
+        dLoc = await geocodeOnce(dropoffText)
+        setDropoffLoc(dLoc)
+      }
+
+      if (!pLoc || !dLoc) {
+        setFareError('找不到其中一個地點，請確認地址是否正確。')
+        return
+      }
+
+      const dist = distanceKm(pLoc, dLoc)
+      const distRounded = Math.round(dist * 10) / 10
+      setLastDistanceKm(distRounded)
+
+      // 粗略判斷：太遠 / 可能跨洋就算「無法成立」
+      if (dist > 80) {
+        setFareError('此行程無法成立，請重新輸入地點')
+        return
+      }
+
+      const baseYellow = 70
+      const perKmYellow = 25
+      const baseGreen = 60
+      const perKmGreen = 22
+      const baseFhv = 90
+      const perKmFhv = 30
+
+      const estYellow = Math.round(baseYellow + perKmYellow * dist)
+      const estGreen = Math.round(baseGreen + perKmGreen * dist)
+      const estFhv = Math.round(baseFhv + perKmFhv * dist)
+
+      setFareOptions([
+        { type: 'yellow', label: 'Yellow 計程車',       price: estYellow },
+        { type: 'green',  label: 'Green 計程車',        price: estGreen },
+        { type: 'fhv',    label: 'FHV（多元計程車）', price: estFhv },
+      ])
+    } catch (e) {
+      console.error(e)
+      setFareError('目前無法連線到伺服器，請稍後再試。')
+    }
+  }
+
+  // ===== 第二步：點某一種車種 → 真正建立訂單 =====
+  const handleChooseFare = async option => {
+    if (!fareOptions || lastDistanceKm == null) {
+      alert('請先按「查看價格與車輛」')
+      return
+    }
+    if (!pickupLoc || !dropoffLoc) {
+      alert('座標尚未準備好，請再按一次「查看價格與車輛」')
+      return
+    }
+    if (!currentUser || currentUser.role !== 'passenger') {
+      alert('請先以乘客身分登入')
+      return
+    }
+
+    setSelectedVehicle(option.type)
+
+    await createOrder(
+      pickupText.trim(),
+      dropoffText.trim(),
+      pickupLoc,
+      dropoffLoc,
+      {
+        distanceKm: lastDistanceKm,
+        vehicleType: option.type,
+        estimatedFare: option.price,
+      }
+    )
+
+    // 下單後清掉表單 & 價格面板
+    setPickupText('')
+    setPickupLoc(null)
+    setPickupSuggestions([])
+    setPickupLocked(false)
+
+    setDropoffText('')
+    setDropoffLoc(null)
+    setDropoffSuggestions([])
+    setDropoffLocked(false)
+
+    setFareOptions(null)
+    setLastDistanceKm(null)
+    setFareError('')
+    setSelectedVehicle(null)
   }
 
   return (
@@ -33,79 +275,162 @@ export default function RiderView({
       {/* 左邊地圖 */}
       <div className="map-wrapper">
         <MapView
-          drivers={drivers}              // MapView 內部會依照訂單 driverId 過濾
-          orders={ordersWithLocations}   // 有座標的版本，拿來畫上車點 / 目的地
-          mode="passenger"               // 乘客端模式：只顯示接到自己訂單的那一台車
+          drivers={drivers}
+          orders={ordersWithLocations}
+          mode="passenger"
+          currentDriverId={null}
         />
       </div>
 
       {/* 右邊操作面板 */}
       <aside className="side-panel">
         <div className="panel-inner">
-          <h1 className="panel-title">乘客端</h1>
+          <h1 className="panel-title">
+            {t(lang, 'passengerMode') /* 乘客端 / Passenger / … */}
+          </h1>
 
-          {/* 目前登入的乘客 */}
           <div className="field-label">目前乘客：</div>
           <div className="current-driver-box">
             {currentUser?.username || '尚未登入'}
           </div>
 
-          {/* 上車地點輸入 */}
+          {/* 上車地點 */}
           <div className="field-label" style={{ marginTop: 24 }}>
-            上車地點（例如：Times Square）
+            {t(lang, 'pickupPlaceholder')}
           </div>
-          <input
-            className="text-input"
-            type="text"
-            placeholder="輸入上車地點"
-            value={pickup}
-            onChange={e => setPickup(e.target.value)}
-          />
+          <div className="autocomplete-wrapper">
+            <input
+              className="text-input"
+              type="text"
+              placeholder={t(lang, 'pickupPlaceholder')}
+              value={pickupText}
+              onChange={e => {
+                setPickupText(e.target.value)
+                setPickupLoc(null)
+                setPickupLocked(false)
+                setPickupSuggestions([])
+                setFareOptions(null)
+                setFareError('')
+                setLastDistanceKm(null)
+                setSelectedVehicle(null)
+              }}
+            />
+            {pickupSuggestions.length > 0 && (
+              <div className="autocomplete-dropdown">
+                {pickupSuggestions.map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="autocomplete-item"
+                    onClick={() => handleSelectPickup(item)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
-          {/* 目的地輸入 */}
+          {/* 目的地 */}
           <div className="field-label" style={{ marginTop: 16 }}>
-            目的地（例如：Central Park）
+            {t(lang, 'dropoffPlaceholder')}
           </div>
-          <input
-            className="text-input"
-            type="text"
-            placeholder="輸入目的地"
-            value={dropoff}
-            onChange={e => setDropoff(e.target.value)}
-          />
+          <div className="autocomplete-wrapper">
+            <input
+              className="text-input"
+              type="text"
+              placeholder={t(lang, 'dropoffPlaceholder')}
+              value={dropoffText}
+              onChange={e => {
+                setDropoffText(e.target.value)
+                setDropoffLoc(null)
+                setDropoffLocked(false)
+                setDropoffSuggestions([])
+                setFareOptions(null)
+                setFareError('')
+                setLastDistanceKm(null)
+                setSelectedVehicle(null)
+              }}
+            />
+            {dropoffSuggestions.length > 0 && (
+              <div className="autocomplete-dropdown">
+                {dropoffSuggestions.map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="autocomplete-item"
+                    onClick={() => handleSelectDropoff(item)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
-          {/* 叫車按鈕 */}
+          {/* 查看價格與車輛 */}
           <button
             type="button"
             className="primary-btn"
             style={{ marginTop: 24, width: '100%' }}
-            onClick={handleCreateOrder}
-            disabled={
-              loading || !currentUser || currentUser.role !== 'passenger'
-            }
+            onClick={handleCheckPrice}
+            disabled={loading}
           >
-            叫車
+            查看價格與車輛
           </button>
 
-          {/* 我的訂單列表 */}
+          {fareError && (
+            <div className="error-box" style={{ marginTop: 16 }}>
+              {fareError}
+            </div>
+          )}
+
+          {fareOptions && !fareError && (
+            <div className="fare-panel" style={{ marginTop: 16 }}>
+              {lastDistanceKm != null && (
+                <div className="field-label" style={{ marginBottom: 8 }}>
+                  預估距離：約 {lastDistanceKm} 公里
+                </div>
+              )}
+              <ul className="fare-list">
+                {fareOptions.map(opt => (
+                  <li key={opt.type} className="fare-item">
+                    <button
+                      type="button"
+                      className={
+                        selectedVehicle === opt.type
+                          ? 'fare-item-btn selected'
+                          : 'fare-item-btn'
+                      }
+                      onClick={() => handleChooseFare(opt)}
+                      disabled={loading}
+                    >
+                      <span>{opt.label}</span>
+                      <span className="fare-price">
+                        約 NT$ {opt.price}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* 我的訂單 */}
           <section className="orders-block" style={{ marginTop: 32 }}>
             <div className="orders-header">
-              <h3>我的訂單</h3>
+              <h3>{t(lang, 'ordersTitlePassenger')}</h3>
               <button
                 className="ghost-btn"
                 type="button"
                 onClick={refresh}
                 disabled={loading}
               >
-                重新整理
+                {t(lang, 'refresh')}
               </button>
             </div>
 
-            <OrderList
-              orders={orders}
-              drivers={drivers}
-              // 乘客端：不傳 isDriverView，所以不會顯示「接單」按鈕
-            />
+            <OrderList orders={orders} drivers={drivers} />
 
             {loading && (
               <div className="auth-hint" style={{ marginTop: 8 }}>

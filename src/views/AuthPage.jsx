@@ -1,172 +1,169 @@
 // src/views/AuthPage.jsx
 import { useState } from 'react'
 
+// ✅ 車種 value 全部改成大寫：YELLOW / GREEN / FHV
+const CAR_TYPES = [
+  { value: 'YELLOW', label: 'Yellow 計程車' },
+  { value: 'GREEN',  label: 'Green 計程車' },
+  { value: 'FHV',    label: 'FHV（多元計程車）' },
+]
+
 export default function AuthPage({ onBack, onRegister, onLogin }) {
-  const [tab, setTab] = useState('login') // 'login' or 'register'
-  const [form, setForm] = useState({
-    username: '',
-    password: '',
-    confirm: '',
-    role: 'passenger'
-  })
+  const [mode, setMode] = useState('login')        // 'login' | 'register'
+  const [role, setRole] = useState('passenger')    // 'passenger' | 'driver'
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [carType, setCarType] = useState('YELLOW') // ✅ 預設第一個：YELLOW
   const [message, setMessage] = useState('')
 
-  const handleChange = e => {
-    const { name, value } = e.target
-    setForm(prev => ({ ...prev, [name]: value }))
-  }
-
-  const handleSubmit = e => {
+  const handleSubmit = async e => {
     e.preventDefault()
     setMessage('')
 
-    const username = form.username.trim()
-    const password = form.password
+    if (mode === 'register') {
+      if (role === 'driver' && !carType) {
+        setMessage('請選擇車輛種類')
+        return
+      }
 
-    if (!username || !password) {
-      setMessage('請輸入帳號與密碼')
+      const result = await onRegister?.({
+        username,
+        password,
+        role,
+        // ✅ 司機註冊時把大寫車種丟出去（YELLOW / GREEN / FHV）
+        carType: role === 'driver' ? carType : null,
+      })
+
+      if (!result?.ok) {
+        setMessage(result?.message || '註冊失敗')
+      }
       return
     }
 
-    if (tab === 'register') {
-      if (password !== form.confirm) {
-        setMessage('兩次輸入的密碼不一致')
-        return
-      }
-      // 呼叫上層註冊邏輯（App 會決定能不能註冊 & 要不要跳頁）
-      const result =
-        onRegister?.({
-          username,
-          password,
-          role: form.role
-        }) || { ok: false, message: '' }
-
-      if (!result.ok && result.message) {
-        setMessage(result.message)
-      }
-      // ok 的情況會被 App 直接導到乘客/司機端，看不到這裡的訊息也沒關係
-    } else {
-      // 登入
-      const result =
-        onLogin?.({
-          username,
-          password
-        }) || { ok: false, message: '' }
-
-      if (!result.ok && result.message) {
-        // ❌ 帳號不存在 或 密碼錯誤
-        setMessage(result.message)
-      }
+    // login
+    const result = await onLogin?.({ username, password })
+    if (!result?.ok) {
+      setMessage(result?.message || '登入失敗')
     }
   }
 
   return (
-    <div className="auth-card">
-      <div className="auth-header">
-        <h2 className="auth-title">SmartDispatch 帳號</h2>
-        <button type="button" className="ghost-btn" onClick={onBack}>
+    <div className="auth-container">
+      <div className="auth-card">
+        <button
+          type="button"
+          className="ghost-btn"
+          onClick={onBack}
+          style={{ marginBottom: 16 }}
+        >
           ← 回首頁
         </button>
-      </div>
 
-      <div className="auth-tabs">
-        <button
-          type="button"
-          className={tab === 'login' ? 'auth-tab active' : 'auth-tab'}
-          onClick={() => {
-            setTab('login')
-            setMessage('')
-          }}
-        >
-          登入
-        </button>
-        <button
-          type="button"
-          className={tab === 'register' ? 'auth-tab active' : 'auth-tab'}
-          onClick={() => {
-            setTab('register')
-            setMessage('')
-          }}
-        >
-          註冊
-        </button>
-      </div>
+        <h1 className="panel-title" style={{ marginBottom: 12 }}>
+          SmartDispatch 帳號
+        </h1>
 
-      <form onSubmit={handleSubmit} className="auth-form">
-        <div className="form-group">
-          <label className="field-label">帳號</label>
-          <input
-            className="text-input"
-            name="username"
-            value={form.username}
-            onChange={handleChange}
-            placeholder="設定一個登入帳號"
-          />
+        <div className="auth-toggle">
+          <button
+            type="button"
+            className={mode === 'login' ? 'mode-btn active' : 'mode-btn'}
+            onClick={() => setMode('login')}
+          >
+            登入
+          </button>
+          <button
+            type="button"
+            className={mode === 'register' ? 'mode-btn active' : 'mode-btn'}
+            onClick={() => setMode('register')}
+          >
+            註冊
+          </button>
         </div>
 
-        <div className="form-group">
-          <label className="field-label">密碼</label>
+        <form onSubmit={handleSubmit} className="auth-form">
+          <div className="field-label" style={{ marginTop: 16 }}>
+            身分
+          </div>
+          <div className="auth-role-toggle">
+            <label>
+              <input
+                type="radio"
+                name="role"
+                value="passenger"
+                checked={role === 'passenger'}
+                onChange={() => setRole('passenger')}
+              />
+              乘客
+            </label>
+            <label style={{ marginLeft: 12 }}>
+              <input
+                type="radio"
+                name="role"
+                value="driver"
+                checked={role === 'driver'}
+                onChange={() => setRole('driver')}
+              />
+              司機
+            </label>
+          </div>
+
+          <div className="field-label" style={{ marginTop: 16 }}>
+            帳號
+          </div>
+          <input
+            className="text-input"
+            type="text"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            placeholder="設定一個登入帳號"
+          />
+
+          <div className="field-label" style={{ marginTop: 16 }}>
+            密碼
+          </div>
           <input
             className="text-input"
             type="password"
-            name="password"
-            value={form.password}
-            onChange={handleChange}
+            value={password}
+            onChange={e => setPassword(e.target.value)}
             placeholder="至少 6 碼"
           />
-        </div>
 
-        {tab === 'register' && (
-          <>
-            <div className="form-group">
-              <label className="field-label">確認密碼</label>
-              <input
-                className="text-input"
-                type="password"
-                name="confirm"
-                value={form.confirm}
-                onChange={handleChange}
-                placeholder="再輸入一次密碼"
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="field-label">身分</label>
+          {/* 只有司機註冊才需要選車種 */}
+          {mode === 'register' && role === 'driver' && (
+            <>
+              <div className="field-label" style={{ marginTop: 16 }}>
+                車輛種類
+              </div>
               <select
                 className="text-input"
-                name="role"
-                value={form.role}
-                onChange={handleChange}
+                value={carType}
+                onChange={e => setCarType(e.target.value)}
               >
-                <option value="passenger">乘客</option>
-                <option value="driver">司機</option>
+                {CAR_TYPES.map(opt => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
               </select>
+            </>
+          )}
+
+          {message && (
+            <div className="error-box" style={{ marginTop: 12 }}>
+              {message}
             </div>
-          </>
-        )}
+          )}
 
-        <button type="submit" className="primary-btn">
-          {tab === 'login' ? '登入' : '建立新帳號'}
-        </button>
-      </form>
-
-      {message && <div className="auth-message">{message}</div>}
-
-      {tab === 'login' && (
-        <p className="auth-hint">
-          還沒有帳號？{' '}
           <button
-            type="button"
-            className="link-btn"
-            onClick={() => {
-              setTab('register')
-              setMessage('')
-            }}
+            type="submit"
+            className="primary-btn"
+            style={{ marginTop: 24, width: '100%' }}
           >
-            立即註冊
+            {mode === 'login' ? '登入' : '立即註冊'}
           </button>
-        </p>
-      )}
+        </form>
+      </div>
     </div>
   )
 }

@@ -1,1 +1,93 @@
 @import './index.css';
+.autocomplete-wrapper {
+  position: relative;
+}
+
+.autocomplete-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #020617;
+  border-radius: 0 0 16px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.autocomplete-item {
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: #e5e7eb;
+  font-size: 14px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(30, 41, 59, 0.8);
+}
+
+.autocomplete-item:last-child {
+  border-bottom: none;
+}
+
+.autocomplete-item:hover {
+  background: rgba(248, 250, 252, 0.08);
+}
+/* ===== 價格選項區塊 ===== */
+.fare-panel {
+  margin-top: 16px;
+  padding: 16px 20px;
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.35); /* 半透明深色卡片 */
+}
+
+.fare-distance-label {
+  font-size: 14px;
+  color: #cfd8ff;
+  margin-bottom: 10px;
+}
+
+/* 拿掉 ul 的黑點，改成直向排列的按鈕列表 */
+.fare-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fare-item {
+  list-style: none;
+}
+
+/* 每一個車種變成一個長按鈕，風格跟上面輸入框類似 */
+.fare-item-btn {
+  width: 100%;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 18px;
+  background: #050b18;      /* 深藍底 */
+  color: #ffffff;
+  font-size: 15px;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.08s ease;
+}
+
+/* hover 效果 */
+.fare-item-btn:hover {
+  background: #0d1426;
+  transform: translateY(-1px);
+}
+
+/* 點選後的樣式（讓使用者知道選了哪一個） */
+.fare-item-btn.selected {
+  background: #0f2b1b;
+  box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.7);
+}
