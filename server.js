@@ -5,7 +5,6 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import fetch from 'node-fetch'
 
-const fetch = require('node-fetch');
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
@@ -36,7 +35,8 @@ let drivers = []
 //   vehicleType,   // 'YELLOW' | 'GREEN' | 'FHV'
 //   estimatedPrice,// 預估價格（同時也寫到 estimatedFare 以保留相容性）
 //   estimatedFare,
-//   stops: [       // ⭐ 中途停靠點 { label, lat, lng }
+//   stops: [       // ⭐ 中途停靠點
+//     { label, lat, lng },
 //     ...
 //   ],
 //   createdAt
@@ -55,6 +55,40 @@ const DRIVER_START_POSITIONS = [
   { lat: 40.7712, lng: -73.9742 }, // Central Park South
 ]
 let nextStartIndex = 0
+
+// 🔻 Geocode 失敗時的備用地點（讓線上版至少會有幾個選項）
+const FALLBACK_GEOCODE_PLACES = [
+  {
+    label: 'Times Square, Manhattan, New York, NY',
+    lat: 40.7580,
+    lng: -73.9855,
+  },
+  {
+    label: 'Central Park, Manhattan, New York, NY',
+    lat: 40.7812,
+    lng: -73.9665,
+  },
+  {
+    label: 'Grand Central Terminal, Manhattan, New York, NY',
+    lat: 40.7527,
+    lng: -73.9772,
+  },
+  {
+    label: 'Wall Street, Manhattan, New York, NY',
+    lat: 40.7060,
+    lng: -74.0086,
+  },
+  {
+    label: 'JFK International Airport, New York, NY',
+    lat: 40.6413,
+    lng: -73.7781,
+  },
+  {
+    label: 'LaGuardia Airport, Queens, New York, NY',
+    lat: 40.7769,
+    lng: -73.8740,
+  },
+]
 
 function getNextStartPosition() {
   const pos =
@@ -121,7 +155,7 @@ app.post('/api/login', (req, res) => {
   const user = users.find(u => u.username === username)
   if (!user) {
     return res.status(400).json({
-      errorCode: 'USER_NOT_FOUND',
+      errorCode: 'NO_SUCH_ACCOUNT',
       error: 'Account not found',
     })
   }
@@ -138,60 +172,54 @@ app.post('/api/login', (req, res) => {
 
 // =================== Geocode API ===================
 app.get('/api/geocode', async (req, res) => {
-  const q = (req.query.q || '').trim();
+  const q = req.query.q
+  const query = (q || '').trim()
 
-  if (!q) {
-    return res.status(400).json({
-      ok: false,
-      error: 'missing-query',
-      message: 'Query is required',
-    });
+  // 沒輸入就直接回空陣列（避免 400）
+  if (!query) {
+    return res.json([])
   }
 
   try {
-    const url =
-      'https://nominatim.openstreetmap.org/search?' +
-      'format=json&addressdetails=1&limit=5&q=' +
-      encodeURIComponent(q);
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(
+      query
+    )}`
 
     const response = await fetch(url, {
       headers: {
-        // Nominatim 要求一定要有 User-Agent，不然有機會 403 / 500
-        'User-Agent': 'ny-taxi-demo/1.0 (example@example.com)',
+        // 有聯絡資訊的 User-Agent，比較不會被 Nominatim 擋
+        'User-Agent': 'taxi-dispatch-demo/1.0 (vivi39120@gmail.com)',
       },
-    });
+    })
 
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      console.error('Geocode upstream error', response.status, text);
-      return res.status(500).json({
-        ok: false,
-        error: 'geocode-upstream-failed',
-      });
+      throw new Error(`Nominatim error: ${response.status}`)
     }
 
-    const data = await response.json();
+    const data = await response.json()
 
     const results = data.map(item => ({
-      displayName: item.display_name,
+      label: item.display_name,
       lat: parseFloat(item.lat),
-      lon: parseFloat(item.lon),
-    }));
+      lng: parseFloat(item.lon),
+    }))
 
-    res.json({ ok: true, results });
+    return res.json(results)
   } catch (err) {
-    console.error('Geocode exception', err);
-    res.status(500).json({
-      ok: false,
-      error: 'geocode-exception',
-    });
-  }
-});
+    // 線上如果 Nominatim 掛掉 / 被擋，改用本機 fallback，不要 500
+    console.error('Geocode failed, using fallback data:', err)
 
+    const keyword = query.toLowerCase()
+    const fallback = FALLBACK_GEOCODE_PLACES.filter(p =>
+      p.label.toLowerCase().includes(keyword)
+    )
+
+    return res.json(fallback)
+  }
+})
 
 // =================== 司機登入 / 位置 ===================
 
-// 司機登入（或註冊）＋給定初始位置
 app.post('/api/driver-login', (req, res) => {
   const { name, carType } = req.body
   if (!name) return res.status(400).json({ error: 'name is required' })
@@ -313,9 +341,9 @@ app.post('/api/orders', (req, res) => {
 
     distanceKm: typeof distanceKm === 'number' ? distanceKm : null,
     vehicleType: normalizeType(vehicleType),
-    estimatedPrice: finalPrice, // 主欄位
-    estimatedFare: finalPrice,  // 兼容舊欄位
-    stops: normalizedStops,     // ⭐ 中途停靠點
+    estimatedPrice: finalPrice,          // 主欄位
+    estimatedFare: finalPrice,           // 兼容舊欄位
+    stops: normalizedStops,              // ⭐ 中途停靠點
     createdAt: new Date().toISOString(),
   }
 
