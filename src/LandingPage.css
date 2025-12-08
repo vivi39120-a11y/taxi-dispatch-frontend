@@ -46,3 +46,25 @@
   background-color: #f8f9fa;
   padding: 80px 0;
 }
+
+/* 流程圖區塊樣式 */
+.icon-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;       /* 變成正圓形 */
+  transition: transform 0.3s ease; /* 加入動畫效果 */
+  
+  /* 確保內容物置中 (建議補上這幾行，確保圖示在圓圈正中間) */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 滑鼠移過去的時候，圖示會往上浮動，增加互動感 */
+.step-card:hover .icon-circle {
+  transform: translateY(-10px);
+}
+
+.ls-1 {
+  letter-spacing: 2px; /* 讓小標題字距寬一點，看起來比較高級 */
+}
