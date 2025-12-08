@@ -130,6 +130,63 @@ export default function LandingPage({
           </div>
         </div>
       </section>
+     /* 流程圖區塊 */
+      <section class="how-it-works-section py-5 bg-white">
+        <div class="container text-center">
+            
+            <div class="mb-5">
+                <span class="text-warning fw-bold text-uppercase ls-1">Simple Steps</span>
+                <h2 class="fw-bold mt-2">如何使用 SmartDispatch？</h2>
+                <p class="text-muted">簡單三步驟，體驗 AI 賦能的紐約出行服務</p>
+            </div>
+
+            <div class="row justify-content-center">
+                
+                <div class="col-md-4 mb-4 mb-md-0 position-relative">
+                    <div class="step-card p-4">
+                        <div class="icon-circle bg-warning text-dark mb-4 mx-auto d-flex align-items-center justify-content-center shadow">
+                            <i class="bi bi-geo-alt-fill fs-2"></i>
+                        </div>
+                        <h4 class="fw-bold">1. 設定目的地</h4>
+                        <p class="text-muted">輸入您的上車點與下車位置，系統將自動估算最佳路徑與透明報價。</p>
+                    </div>
+                    <div class="d-none d-md-block position-absolute top-50 end-0 translate-middle-y text-muted">
+                        <i class="bi bi-chevron-right fs-1"></i>
+                    </div>
+                </div>
+
+                <div class="col-md-4 mb-4 mb-md-0 position-relative">
+                    <div class="step-card p-4">
+                        <div class="icon-circle bg-dark text-warning mb-4 mx-auto d-flex align-items-center justify-content-center shadow">
+                            <i class="bi bi-cpu-fill fs-2"></i>
+                        </div>
+                        <h4 class="fw-bold">2. AI 智慧媒合</h4>
+                        <p class="text-muted">我們的 AI 演算法會在毫秒內分析全紐約路況，為您指派最快抵達的車輛。</p>
+                    </div>
+                    <div class="d-none d-md-block position-absolute top-50 end-0 translate-middle-y text-muted">
+                        <i class="bi bi-chevron-right fs-1"></i>
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="step-card p-4">
+                        <div class="icon-circle bg-warning text-dark mb-4 mx-auto d-flex align-items-center justify-content-center shadow">
+                            <i class="bi bi-emoji-smile-fill fs-2"></i>
+                        </div>
+                        <h4 class="fw-bold">3. 安心抵達</h4>
+                        <p class="text-muted">即時追蹤司機位置，享受安全舒適的旅程，並在抵達後輕鬆支付。</p>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="mt-5">
+                <a href="#" class="btn btn-dark btn-lg px-5 rounded-pill shadow-sm">
+                    立即開始叫車 <i class="bi bi-arrow-right ms-2"></i>
+                </a>
+            </div>
+        </div>
+    </section>
 
       {/* 司機招募區塊 */}
       <section className="driver-section" id="driver">
