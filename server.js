@@ -1,10 +1,4 @@
 // server.js
-// drivers: { id, name, lat, lng, status, carType }
-// orders : { id, pickup, dropoff, pickupLat, pickupLng, dropoffLat, dropoffLng,
-//            vehicleType, distanceKm, estimatedPrice,
-//            customer, status, driverId, driverName, createdAt }
-
-
 import express from 'express'
 import cors from 'cors'
 import path from 'path'
@@ -18,10 +12,31 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
-// ===== in-memory 資料 =====
-// 多加：pickupLat/pickupLng/dropoffLat/dropoffLng + distanceKm / vehicleType / estimatedFare
-let drivers = [] // { id, name, lat, lng, status }
-let orders = []  // { id, pickup, dropoff, pickupLat, pickupLng, dropoffLat, dropoffLng, distanceKm, vehicleType, estimatedFare, customer, status, driverId, driverName, createdAt }
+// ===== 小型「資料庫」：使用者 / 司機 / 訂單 =====
+
+// 使用者：註冊 / 登入 用
+// { id, username, password, role, carType }
+let users = []
+let nextUserId = 1
+
+// 司機：地圖上那台車
+// { id, name, lat, lng, status, carType }
+let drivers = []
+
+// 訂單：包含經緯度與計價資訊
+// {
+//   id, pickup, dropoff,
+//   pickupLat, pickupLng,
+//   dropoffLat, dropoffLng,
+//   customer,
+//   status,        // 'pending' | 'assigned'
+//   driverId, driverName,
+//   distanceKm,    // 預估距離
+//   vehicleType,   // 'YELLOW' | 'GREEN' | 'FHV'
+//   estimatedFare, // 預估價格
+//   createdAt
+// }
+let orders = []
 let nextDriverId = 1
 let nextOrderId = 1
 
@@ -43,7 +58,65 @@ function getNextStartPosition() {
   return { ...pos }
 }
 
-// ===== geocode API (Nominatim) =====
+function normalizeType(value) {
+  if (typeof value !== 'string') return null
+  return value.toUpperCase()
+}
+
+// =================== Auth API：註冊 / 登入 ===================
+
+// 註冊：帳號不能重複
+app.post('/api/register', (req, res) => {
+  const { username, password, role, carType } = req.body
+
+  if (!username || !password || !role) {
+    return res.status(400).json({ error: '缺少必要欄位（username / password / role）' })
+  }
+
+  const existed = users.find(u => u.username === username)
+  if (existed) {
+    // 帳號重複 → 409 Conflict
+    return res.status(409).json({ error: '此帳號名稱已被使用，請改用其他名稱。' })
+  }
+
+  const carTypeUpper =
+    role === 'driver' && carType ? normalizeType(carType) : null
+
+  const user = {
+    id: nextUserId++,
+    username,
+    password,       // Demo 用：實務上要做 hash
+    role,           // 'passenger' | 'driver'
+    carType: carTypeUpper,
+  }
+  users.push(user)
+  console.log('New user registered:', user)
+
+  // 回傳時不要把密碼給前端
+  const { password: _, ...safeUser } = user
+  return res.json(safeUser)
+})
+
+// 登入：帳號必須存在，密碼要相符
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body
+  if (!username || !password) {
+    return res.status(400).json({ error: '請輸入帳號與密碼。' })
+  }
+
+  const user = users.find(u => u.username === username)
+  if (!user) {
+    return res.status(400).json({ error: '查無此帳號，請先註冊。' })
+  }
+  if (user.password !== password) {
+    return res.status(400).json({ error: '密碼錯誤，請再試一次。' })
+  }
+
+  const { password: _, ...safeUser } = user
+  return res.json(safeUser)
+})
+
+// =================== Geocode API ===================
 app.get('/api/geocode', async (req, res) => {
   const q = req.query.q
   if (!q || q.trim() === '') {
@@ -80,43 +153,41 @@ app.get('/api/geocode', async (req, res) => {
   }
 })
 
-// ===== API：司機登入 / 註冊 =====
+// =================== 司機登入 / 位置 ===================
+
 app.post('/api/driver-login', (req, res) => {
   const { name, carType } = req.body
   if (!name) return res.status(400).json({ error: 'name is required' })
 
+  const carTypeUpper = carType ? normalizeType(carType) : null
+
   let driver = drivers.find(d => d.name === name)
-
   if (!driver) {
-    // 第一次登入：建立新司機，記錄車種
     const pos = getNextStartPosition()
-    const type = carType || 'Yellow'  // 沒給就預設 Yellow
-
     driver = {
       id: nextDriverId++,
       name,
       lat: pos.lat,
       lng: pos.lng,
       status: 'idle',
-      carType: type,
+      carType: carTypeUpper,
     }
     drivers.push(driver)
     console.log('New driver registered:', driver)
-  } else if (carType && !driver.carType) {
-    // 舊資料沒有 carType 的話，第一次帶 carType 進來就補上
-    driver.carType = carType
+  } else {
+    // 如果後來更新了 carType，補上去
+    if (carTypeUpper && !driver.carType) {
+      driver.carType = carTypeUpper
+    }
   }
 
   res.json(driver)
 })
 
-
-// ===== API：取得全部司機 =====
 app.get('/api/drivers', (req, res) => {
   res.json(drivers)
 })
 
-// ===== API：更新司機位置 =====
 app.patch('/api/drivers/:id/location', (req, res) => {
   const id = Number(req.params.id)
   const { lat, lng, status } = req.body
@@ -131,7 +202,8 @@ app.patch('/api/drivers/:id/location', (req, res) => {
   res.json(driver)
 })
 
-// ===== API：乘客下單（含經緯度 & 車種 & 價格）=====
+// =================== 訂單 API ===================
+
 app.post('/api/orders', (req, res) => {
   const {
     pickup,
@@ -141,9 +213,9 @@ app.post('/api/orders', (req, res) => {
     pickupLng,
     dropoffLat,
     dropoffLng,
-    vehicleType,     // 乘客選的車種（Yellow / Green / FHV）
-    distanceKm,      // 預估距離（公里）
-    estimatedPrice,  // 該車種的預估價錢（單位隨你）
+    distanceKm,
+    vehicleType,
+    estimatedFare,
   } = req.body
 
   if (!pickup || !dropoff) {
@@ -158,28 +230,27 @@ app.post('/api/orders', (req, res) => {
     pickupLng: typeof pickupLng === 'number' ? pickupLng : null,
     dropoffLat: typeof dropoffLat === 'number' ? dropoffLat : null,
     dropoffLng: typeof dropoffLng === 'number' ? dropoffLng : null,
-    vehicleType: vehicleType || null,
-    distanceKm: typeof distanceKm === 'number' ? distanceKm : null,
-    estimatedPrice: typeof estimatedPrice === 'number' ? estimatedPrice : null,
     customer: customer || null,
     status: 'pending',
     driverId: null,
     driverName: null,
+    distanceKm: typeof distanceKm === 'number' ? distanceKm : null,
+    vehicleType: normalizeType(vehicleType),
+    estimatedFare:
+      typeof estimatedFare === 'number' ? estimatedFare : null,
     createdAt: new Date().toISOString(),
   }
+
   orders.push(order)
   console.log('New order:', order)
 
   res.json(order)
 })
 
-
-// ===== API：取得全部訂單 =====
 app.get('/api/orders', (req, res) => {
   res.json(orders)
 })
 
-// ===== API：司機接單 =====
 app.post('/api/orders/:id/assign', (req, res) => {
   const id = Number(req.params.id)
   const { driverId, driverName } = req.body
@@ -199,7 +270,7 @@ app.post('/api/orders/:id/assign', (req, res) => {
   res.json(order)
 })
 
-// ===== 靜態檔案（build 後）=====
+// =================== 前端靜態檔案 ===================
 const distPath = path.join(__dirname, 'dist')
 app.use(express.static(distPath))
 

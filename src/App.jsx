@@ -29,14 +29,13 @@ export default function App() {
   const [showLanding, setShowLanding] = useState(getInitialShowLandingFromUrl)
   const [showAuth, setShowAuth] = useState(false)
 
-// 帳號（存在前端就好）
-// users: { username, password, role, carType? }
-  const [users, setUsers] = useState([]) // {username, password, role}
-  const [currentUser, setCurrentUser] = useState(null) // {username, role}
+  // ✅ 帳號：只記錄「目前登入者」，真正帳號存在 server.js
+  // currentUser: { id, username, role, carType }
+  const [currentUser, setCurrentUser] = useState(null)
 
   // 司機 / 訂單
-  const [drivers, setDrivers] = useState([]) // [{id,name,lat,lng,status}]
-  const [orders, setOrders] = useState([]) // [{id,pickup,...}]
+  const [drivers, setDrivers] = useState([]) // [{id,name,lat,lng,status,carType}]
+  const [orders, setOrders] = useState([])   // [{id,pickup,...}]
 
   const [currentDriverId, setCurrentDriverId] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -100,7 +99,7 @@ export default function App() {
     return orders.filter(o => o.customer === currentUser.username)
   }, [orders, currentUser])
 
-  // 目前登入乘客自己的訂單 + 座標（直接從 ordersWithLocations 過濾，不再重算）
+  // 目前登入乘客自己的訂單 + 座標（直接從 ordersWithLocations 過濾）
   const passengerOrdersWithLoc = useMemo(() => {
     if (!currentUser || currentUser.role !== 'passenger') return []
     return ordersWithLocations.filter(
@@ -111,54 +110,57 @@ export default function App() {
   // 司機端直接用全部訂單＋座標
   const driverOrdersWithLoc = ordersWithLocations
 
-  // ===== 乘客下單（吃 geocode 經緯度）=====
+  // ===== 乘客下單 =====
   // pickup / dropoff：顯示用文字
   // pickupLoc / dropoffLoc：{lat, lng}
-// 只貼「乘客下單」那一段，其他保持你現在的版本
-
-// ===== 乘客下單 =====
-// ===== 乘客下單 =====
-const createOrder = async (pickup, dropoff, pickupLoc, dropoffLoc, fareInfo) => {
-  if (!pickup.trim() || !dropoff.trim()) return
-  if (!currentUser || currentUser.role !== 'passenger') {
-    alert('請先以乘客身分登入')
-    return
-  }
-
-  setLoading(true)
-  setError('')
-  try {
-    const res = await fetch('/api/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pickup,
-        dropoff,
-        customer: currentUser.username,
-        pickupLat: pickupLoc?.lat ?? null,
-        pickupLng: pickupLoc?.lng ?? null,
-        dropoffLat: dropoffLoc?.lat ?? null,
-        dropoffLng: dropoffLoc?.lng ?? null,
-        vehicleType: fareInfo?.vehicleType || null,
-        distanceKm: fareInfo?.distanceKm ?? null,
-        estimatedPrice: fareInfo?.price ?? null,
-      }),
-    })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || `HTTP ${res.status}`)
+  // fareInfo：{ vehicleType, distanceKm, price }
+  const createOrder = async (
+    pickup,
+    dropoff,
+    pickupLoc,
+    dropoffLoc,
+    fareInfo
+  ) => {
+    if (!pickup.trim() || !dropoff.trim()) return
+    if (!currentUser || currentUser.role !== 'passenger') {
+      alert('請先以乘客身分登入')
+      return
     }
-    const order = await res.json()
-    setOrders(prev => [...prev, order])
-  } catch (err) {
-    console.error(err)
-    setError('下單失敗，請稍後再試。')
-  } finally {
-    setLoading(false)
+
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pickup,
+          dropoff,
+          customer: currentUser.username,
+          pickupLat: pickupLoc?.lat ?? null,
+          pickupLng: pickupLoc?.lng ?? null,
+          dropoffLat: dropoffLoc?.lat ?? null,
+          dropoffLng: dropoffLoc?.lng ?? null,
+          vehicleType: fareInfo?.vehicleType || null,
+          distanceKm: fareInfo?.distanceKm ?? null,
+          // 後端主要用 estimatedFare；estimatedPrice 給舊欄位相容
+          estimatedFare: fareInfo?.price ?? null,
+          estimatedPrice: fareInfo?.price ?? null,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `HTTP ${res.status}`)
+      }
+      const order = await res.json()
+      setOrders(prev => [...prev, order])
+    } catch (err) {
+      console.error(err)
+      setError('下單失敗，請稍後再試。')
+    } finally {
+      setLoading(false)
+    }
   }
-}
-
-
 
   // ===== 司機接單 =====
   const acceptOrder = async orderId => {
@@ -207,30 +209,29 @@ const createOrder = async (pickup, dropoff, pickupLoc, dropoffLoc, fareInfo) => 
 
   // ===== 司機登入後建立自己的車 =====
   const attachDriverForUser = async user => {
-  if (!user || user.role !== 'driver') return
+    if (!user || user.role !== 'driver') return
 
-  try {
-    const res = await fetch('/api/driver-login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: user.username,
-        carType: user.carType || 'Yellow',
-      }),
-    })
-    if (!res.ok) throw new Error('driver-login failed')
-    const driver = await res.json()
-    setCurrentDriverId(driver.id)
-    setDrivers(prev => {
-      const exists = prev.some(d => d.id === driver.id)
-      return exists ? prev : [...prev, driver]
-    })
-  } catch (err) {
-    console.error(err)
-    setError('無法建立司機車輛，請稍後再試。')
+    try {
+      const res = await fetch('/api/driver-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: user.username,
+          carType: user.carType || null, // 後端會自己做大寫 normalize
+        }),
+      })
+      if (!res.ok) throw new Error('driver-login failed')
+      const driver = await res.json()
+      setCurrentDriverId(driver.id)
+      setDrivers(prev => {
+        const exists = prev.some(d => d.id === driver.id)
+        return exists ? prev : [...prev, driver]
+      })
+    } catch (err) {
+      console.error(err)
+      setError('無法建立司機車輛，請稍後再試。')
+    }
   }
-}
-
 
   // ===== 司機端：只移動「自己那台車」 =====
   useEffect(() => {
@@ -311,55 +312,83 @@ const createOrder = async (pickup, dropoff, pickupLoc, dropoffLoc, fareInfo) => 
     return () => clearInterval(timer)
   }, [simulateVehicles, currentUser, currentDriverId, driverOrdersWithLoc])
 
-  // ===== Auth：註冊 / 登入 =====
-const registerUser = ({ username, password, role, carType }) => {
-  if (users.some(u => u.username === username)) {
-    return { ok: false, message: '此帳號已被註冊，請改用其他帳號或直接登入。' }
+  // ===== Auth：註冊 / 登入（改成呼叫後端）=====
+
+  // 註冊：呼叫 /api/register
+  const registerUser = async ({ username, password, role, carType }) => {
+    try {
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username,
+          password,
+          role,
+          carType: role === 'driver' ? carType : null,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        return {
+          ok: false,
+          message: data.error || '註冊失敗，請稍後再試。',
+        }
+      }
+
+      const user = await res.json() // {id, username, role, carType}
+      setCurrentUser(user)
+
+      if (user.role === 'driver') {
+        setMode('driver')
+        attachDriverForUser(user)
+      } else {
+        setMode('rider')
+      }
+
+      setShowAuth(false)
+      setShowLanding(false)
+      return { ok: true }
+    } catch (err) {
+      console.error(err)
+      return { ok: false, message: '無法連線伺服器，請稍後再試。' }
+    }
   }
 
-  const newUser = {
-    username,
-    password,
-    role,
-    carType: role === 'driver' ? carType : null,
-  }
+  // 登入：呼叫 /api/login
+  const loginUser = async ({ username, password }) => {
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
 
-  setUsers(prev => [...prev, newUser])
-  setCurrentUser(newUser)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        return {
+          ok: false,
+          message: data.error || '登入失敗，請稍後再試。',
+        }
+      }
 
-  if (role === 'driver') {
-    setMode('driver')
-    attachDriverForUser(newUser)
-  } else {
-    setMode('rider')
-  }
+      const user = await res.json()
+      setCurrentUser(user)
 
-  setShowAuth(false)
-  setShowLanding(false)
-  return { ok: true }
-}
+      if (user.role === 'driver') {
+        setMode('driver')
+        attachDriverForUser(user)
+      } else {
+        setMode('rider')
+      }
 
-
-  const loginUser = ({ username, password }) => {
-    const user = users.find(u => u.username === username)
-    if (!user) {
-      return { ok: false, message: '查無此帳號，請先註冊。' }
+      setShowAuth(false)
+      setShowLanding(false)
+      return { ok: true }
+    } catch (err) {
+      console.error(err)
+      return { ok: false, message: '無法連線伺服器，請稍後再試。' }
     }
-    if (user.password !== password) {
-      return { ok: false, message: '密碼錯誤，請再試一次。' }
-    }
-
-    setCurrentUser(user)
-    if (user.role === 'driver') {
-      setMode('driver')
-      attachDriverForUser(user)
-    } else {
-      setMode('rider')
-    }
-
-    setShowAuth(false)
-    setShowLanding(false)
-    return { ok: true }
   }
 
   // ===== 共用 props =====

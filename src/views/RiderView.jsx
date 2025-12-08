@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import MapView from '../components/MapView.jsx'
 import OrderList from '../components/OrderList.jsx'
-import { t } from '../i18n'   // ✅ 接 i18n
+import { t } from '../i18n'
 
 export default function RiderView({
   lang,
@@ -25,7 +25,7 @@ export default function RiderView({
   const [pickupLoc, setPickupLoc] = useState(null)     // {lat, lng}
   const [dropoffLoc, setDropoffLoc] = useState(null)   // {lat, lng}
 
-  // ✅ 選單「鎖定」旗標（已選好，不再查詢）
+  // 選單「鎖定」旗標（已選好，不再查詢）
   const [pickupLocked, setPickupLocked] = useState(false)
   const [dropoffLocked, setDropoffLocked] = useState(false)
 
@@ -34,6 +34,14 @@ export default function RiderView({
   const [fareError, setFareError] = useState('')
   const [lastDistanceKm, setLastDistanceKm] = useState(null)
   const [selectedVehicle, setSelectedVehicle] = useState(null)
+
+  // ✅ 乘客端地圖：只顯示「已派給這個乘客的訂單」所屬的司機
+  const assignedDriverIds = new Set(
+    (ordersWithLocations || [])
+      .filter(o => o.status === 'assigned' && o.driverId != null)
+      .map(o => o.driverId)
+  )
+  const visibleDrivers = drivers.filter(d => assignedDriverIds.has(d.id))
 
   // ===== 小工具：呼叫一次 geocode，拿第一筆結果 =====
   async function geocodeOnce(text) {
@@ -46,7 +54,7 @@ export default function RiderView({
     return { lat: first.lat, lng: first.lng }
   }
 
-  // ===== 小工具：算兩點距離（km，haversine）=====
+  // ===== 小工具：算兩點距離（km，haversine） =====
   function distanceKm(a, b) {
     const toRad = d => (d * Math.PI) / 180
     const R = 6371 // 地球半徑 km
@@ -87,7 +95,7 @@ export default function RiderView({
         const data = await res.json()
         setPickupSuggestions(data || [])
       } catch {
-        // 忽略錯誤
+        // ignore
       }
     }, 400)
 
@@ -120,7 +128,7 @@ export default function RiderView({
         const data = await res.json()
         setDropoffSuggestions(data || [])
       } catch {
-        // 忽略錯誤
+        // ignore
       }
     }, 400)
 
@@ -135,9 +143,8 @@ export default function RiderView({
     setPickupText(item.label)
     setPickupLoc({ lat: item.lat, lng: item.lng })
     setPickupSuggestions([])
-    setPickupLocked(true)           // ✅ 鎖定：不再出現清單
+    setPickupLocked(true)
 
-    // 地址變了 → 清掉舊的價格結果
     setFareOptions(null)
     setFareError('')
     setLastDistanceKm(null)
@@ -202,6 +209,7 @@ export default function RiderView({
         return
       }
 
+      // 粗略費率
       const baseYellow = 70
       const perKmYellow = 25
       const baseGreen = 60
@@ -213,10 +221,11 @@ export default function RiderView({
       const estGreen = Math.round(baseGreen + perKmGreen * dist)
       const estFhv = Math.round(baseFhv + perKmFhv * dist)
 
+      // ✅ type 一律用大寫，方便跟司機 carType 比對
       setFareOptions([
-        { type: 'yellow', label: 'Yellow 計程車',       price: estYellow },
-        { type: 'green',  label: 'Green 計程車',        price: estGreen },
-        { type: 'fhv',    label: 'FHV（多元計程車）', price: estFhv },
+        { type: 'YELLOW', label: 'Yellow 計程車',        price: estYellow },
+        { type: 'GREEN',  label: 'Green 計程車',         price: estGreen },
+        { type: 'FHV',    label: 'FHV（多元計程車）',    price: estFhv },
       ])
     } catch (e) {
       console.error(e)
@@ -248,7 +257,7 @@ export default function RiderView({
       dropoffLoc,
       {
         distanceKm: lastDistanceKm,
-        vehicleType: option.type,
+        vehicleType: option.type,   // 已是大寫 YELLOW/GREEN/FHV
         estimatedFare: option.price,
       }
     )
@@ -275,7 +284,7 @@ export default function RiderView({
       {/* 左邊地圖 */}
       <div className="map-wrapper">
         <MapView
-          drivers={drivers}
+          drivers={visibleDrivers}          // ✅ 只顯示已派給自己的司機
           orders={ordersWithLocations}
           mode="passenger"
           currentDriverId={null}
@@ -286,7 +295,7 @@ export default function RiderView({
       <aside className="side-panel">
         <div className="panel-inner">
           <h1 className="panel-title">
-            {t(lang, 'passengerMode') /* 乘客端 / Passenger / … */}
+            {t(lang, 'passengerMode')}
           </h1>
 
           <div className="field-label">目前乘客：</div>
