@@ -11,7 +11,7 @@ export default function RiderView({
   ordersWithLocations,  // 有座標的版本，拿來畫地圖
   loading,
   error,
-  createOrder,          // (pickup, dropoff, pickupLoc, dropoffLoc, pricing)
+  createOrder,          // (pickup, dropoff, pickupLoc, dropoffLoc, fareInfo, stops)
   refresh,
   currentUser,
 }) {
@@ -19,29 +19,25 @@ export default function RiderView({
   const [pickupText, setPickupText] = useState('')
   const [dropoffText, setDropoffText] = useState('')
 
-  // geocode 建議 & 選中的座標
+  // geocode 建議 & 選中的座標（起點 / 終點）
   const [pickupSuggestions, setPickupSuggestions] = useState([])
   const [dropoffSuggestions, setDropoffSuggestions] = useState([])
-  const [pickupLoc, setPickupLoc] = useState(null)     // {lat, lng}
-  const [dropoffLoc, setDropoffLoc] = useState(null)   // {lat, lng}
+  const [pickupLoc, setPickupLoc] = useState(null)
+  const [dropoffLoc, setDropoffLoc] = useState(null)
 
-  // 選單「鎖定」旗標（已選好，不再查詢）
+  // 起點 / 終點是否「鎖定」
   const [pickupLocked, setPickupLocked] = useState(false)
   const [dropoffLocked, setDropoffLocked] = useState(false)
 
+  // ⭐ 中途停靠點：[{ text, loc, suggestions, locked }]
+  const [stops, setStops] = useState([])
+
   // 預估價格結果
-  const [fareOptions, setFareOptions] = useState(null) // [{type,label,price}]
+  const [fareOptions, setFareOptions] = useState(null)
   const [fareError, setFareError] = useState('')
   const [lastDistanceKm, setLastDistanceKm] = useState(null)
   const [selectedVehicle, setSelectedVehicle] = useState(null)
-
-  // ✅ 乘客端地圖：只顯示「已派給這個乘客的訂單」所屬的司機
-  const assignedDriverIds = new Set(
-    (ordersWithLocations || [])
-      .filter(o => o.status === 'assigned' && o.driverId != null)
-      .map(o => o.driverId)
-  )
-  const visibleDrivers = drivers.filter(d => assignedDriverIds.has(d.id))
+  const [resolvedStops, setResolvedStops] = useState([])
 
   // ===== 小工具：呼叫一次 geocode，拿第一筆結果 =====
   async function geocodeOnce(text) {
@@ -54,10 +50,10 @@ export default function RiderView({
     return { lat: first.lat, lng: first.lng }
   }
 
-  // ===== 小工具：算兩點距離（km，haversine） =====
+  // ===== 小工具：算兩點距離（km，haversine）=====
   function distanceKm(a, b) {
     const toRad = d => (d * Math.PI) / 180
-    const R = 6371 // 地球半徑 km
+    const R = 6371 // km
     const dLat = toRad(b.lat - a.lat)
     const dLng = toRad(b.lng - a.lng)
     const la1 = toRad(a.lat)
@@ -72,7 +68,7 @@ export default function RiderView({
     return R * c
   }
 
-  // ===== 上車地點：打字 → call /api/geocode 拿建議 =====
+  // ===== 上車地點：打字 → geocode 建議 =====
   useEffect(() => {
     if (pickupLocked) {
       setPickupSuggestions([])
@@ -105,7 +101,7 @@ export default function RiderView({
     }
   }, [pickupText, pickupLocked])
 
-  // ===== 目的地：打字 → call /api/geocode 拿建議 =====
+  // ===== 目的地：打字 → geocode 建議 =====
   useEffect(() => {
     if (dropoffLocked) {
       setDropoffSuggestions([])
@@ -138,50 +134,120 @@ export default function RiderView({
     }
   }, [dropoffText, dropoffLocked])
 
-  // 使用者點選一個上車建議
   const handleSelectPickup = item => {
     setPickupText(item.label)
     setPickupLoc({ lat: item.lat, lng: item.lng })
     setPickupSuggestions([])
     setPickupLocked(true)
-
-    setFareOptions(null)
-    setFareError('')
-    setLastDistanceKm(null)
-    setSelectedVehicle(null)
+    resetFarePanel()
   }
 
-  // 使用者點選一個目的地建議
   const handleSelectDropoff = item => {
     setDropoffText(item.label)
     setDropoffLoc({ lat: item.lat, lng: item.lng })
     setDropoffSuggestions([])
     setDropoffLocked(true)
+    resetFarePanel()
+  }
 
+  // ===== 中途停靠點：新增 / 移除 / 修改 =====
+  const addStop = () => {
+    setStops(prev => [
+      ...prev,
+      { text: '', loc: null, suggestions: [], locked: false },
+    ])
+    resetFarePanel()
+  }
+
+  const removeStop = index => {
+    setStops(prev => prev.filter((_, i) => i !== index))
+    resetFarePanel()
+  }
+
+  // 打字時，同步更新文字，並即時去後端抓建議
+  const updateStopText = (index, text) => {
+    setStops(prev => {
+      const copy = [...prev]
+      if (!copy[index]) return prev
+      copy[index] = {
+        ...copy[index],
+        text,
+        loc: null,
+        locked: false,
+        suggestions: [],
+      }
+      return copy
+    })
+    resetFarePanel()
+
+    const trimmed = text.trim()
+    if (trimmed.length < 2) return
+
+    // 立刻打 API（不另外做 debounce，簡化實作）
+    ;(async () => {
+      try {
+        const res = await fetch(
+          `/api/geocode?q=${encodeURIComponent(trimmed)}`
+        )
+        if (!res.ok) return
+        const data = await res.json()
+        setStops(prev => {
+          const copy = [...prev]
+          if (!copy[index]) return prev
+          // 如果期間使用者已經改文字 / 鎖定，就不要覆蓋
+          if (copy[index].locked) return prev
+          if (copy[index].text !== text) return prev
+          copy[index] = {
+            ...copy[index],
+            suggestions: Array.isArray(data) ? data : [],
+          }
+          return copy
+        })
+      } catch {
+        // ignore
+      }
+    })()
+  }
+
+  // 選取停靠點建議：填入文字 + 存 loc + ✨ 收起下拉選單
+  const handleSelectStopSuggestion = (index, item) => {
+    setStops(prev => {
+      const copy = [...prev]
+      if (!copy[index]) return prev
+      copy[index] = {
+        ...copy[index],
+        text: item.label,
+        loc: { lat: item.lat, lng: item.lng },
+        suggestions: [],
+        locked: true,
+      }
+      return copy
+    })
+    resetFarePanel()
+  }
+
+  const resetFarePanel = () => {
     setFareOptions(null)
     setFareError('')
     setLastDistanceKm(null)
     setSelectedVehicle(null)
+    setResolvedStops([])
   }
 
-  // ===== 第一步：只算距離 + 顯示可選車種，不下單 =====
+  // ===== 第一步：只算距離 + 顯示可選車種 =====
   const handleCheckPrice = async () => {
     if (!pickupText.trim() || !dropoffText.trim()) {
-      alert('請輸入上車地點與目的地')
+      alert(t(lang, 'needPickupDropoff'))
       return
     }
     if (!currentUser || currentUser.role !== 'passenger') {
-      alert('請先以乘客身分登入')
+      alert(t(lang, 'needLoginPassenger'))
       return
     }
 
-    setFareError('')
-    setFareOptions(null)
-    setLastDistanceKm(null)
-    setSelectedVehicle(null)
+    resetFarePanel()
 
     try {
-      // 1) 取得精準座標（沒選清單也會自動 geocode）
       let pLoc = pickupLoc
       let dLoc = dropoffLoc
 
@@ -195,21 +261,52 @@ export default function RiderView({
       }
 
       if (!pLoc || !dLoc) {
-        setFareError('找不到其中一個地點，請確認地址是否正確。')
+        setFareError(t(lang, 'cannotFindPickupOrDropoff'))
         return
       }
 
-      const dist = distanceKm(pLoc, dLoc)
-      const distRounded = Math.round(dist * 10) / 10
+      // 停靠點
+      const resolved = []
+      for (const s of stops) {
+        const label = (s.text || '').trim()
+        if (!label) continue
+
+        let loc = s.loc
+        if (!loc) {
+          loc = await geocodeOnce(label)
+        }
+        if (!loc) {
+          setFareError(t(lang, 'cannotFindStop'))
+          return
+        }
+        resolved.push({
+          label,
+          lat: loc.lat,
+          lng: loc.lng,
+        })
+      }
+
+      setResolvedStops(resolved)
+
+      const points = [
+        { lat: pLoc.lat, lng: pLoc.lng },
+        ...resolved.map(s => ({ lat: s.lat, lng: s.lng })),
+        { lat: dLoc.lat, lng: dLoc.lng },
+      ]
+
+      let totalDist = 0
+      for (let i = 0; i < points.length - 1; i++) {
+        totalDist += distanceKm(points[i], points[i + 1])
+      }
+
+      const distRounded = Math.round(totalDist * 10) / 10
       setLastDistanceKm(distRounded)
 
-      // 粗略判斷：太遠 / 可能跨洋就算「無法成立」
-      if (dist > 80) {
-        setFareError('此行程無法成立，請重新輸入地點')
+      if (totalDist > 80) {
+        setFareError(t(lang, 'tripTooFar'))
         return
       }
 
-      // 粗略費率
       const baseYellow = 70
       const perKmYellow = 25
       const baseGreen = 60
@@ -217,34 +314,33 @@ export default function RiderView({
       const baseFhv = 90
       const perKmFhv = 30
 
-      const estYellow = Math.round(baseYellow + perKmYellow * dist)
-      const estGreen = Math.round(baseGreen + perKmGreen * dist)
-      const estFhv = Math.round(baseFhv + perKmFhv * dist)
+      const estYellow = Math.round(baseYellow + perKmYellow * totalDist)
+      const estGreen = Math.round(baseGreen + perKmGreen * totalDist)
+      const estFhv = Math.round(baseFhv + perKmFhv * totalDist)
 
-      // ✅ type 一律用大寫，方便跟司機 carType 比對
       setFareOptions([
-        { type: 'YELLOW', label: 'Yellow 計程車',        price: estYellow },
-        { type: 'GREEN',  label: 'Green 計程車',         price: estGreen },
-        { type: 'FHV',    label: 'FHV（多元計程車）',    price: estFhv },
+        { type: 'YELLOW', label: t(lang, 'carTypeYellow'), price: estYellow },
+        { type: 'GREEN',  label: t(lang, 'carTypeGreen'),  price: estGreen },
+        { type: 'FHV',    label: t(lang, 'carTypeFhv'),    price: estFhv },
       ])
     } catch (e) {
       console.error(e)
-      setFareError('目前無法連線到伺服器，請稍後再試。')
+      setFareError(t(lang, 'networkError'))
     }
   }
 
-  // ===== 第二步：點某一種車種 → 真正建立訂單 =====
+  // ===== 第二步：點某車種 → 建立訂單 =====
   const handleChooseFare = async option => {
     if (!fareOptions || lastDistanceKm == null) {
-      alert('請先按「查看價格與車輛」')
+      alert(t(lang, 'needPriceFirst'))
       return
     }
     if (!pickupLoc || !dropoffLoc) {
-      alert('座標尚未準備好，請再按一次「查看價格與車輛」')
+      alert(t(lang, 'needCoordsPrepared'))
       return
     }
     if (!currentUser || currentUser.role !== 'passenger') {
-      alert('請先以乘客身分登入')
+      alert(t(lang, 'needLoginPassenger'))
       return
     }
 
@@ -257,12 +353,13 @@ export default function RiderView({
       dropoffLoc,
       {
         distanceKm: lastDistanceKm,
-        vehicleType: option.type,   // 已是大寫 YELLOW/GREEN/FHV
-        estimatedFare: option.price,
-      }
+        vehicleType: option.type,
+        price: option.price,
+      },
+      resolvedStops
     )
 
-    // 下單後清掉表單 & 價格面板
+    // reset
     setPickupText('')
     setPickupLoc(null)
     setPickupSuggestions([])
@@ -273,10 +370,8 @@ export default function RiderView({
     setDropoffSuggestions([])
     setDropoffLocked(false)
 
-    setFareOptions(null)
-    setLastDistanceKm(null)
-    setFareError('')
-    setSelectedVehicle(null)
+    setStops([])
+    resetFarePanel()
   }
 
   return (
@@ -284,7 +379,8 @@ export default function RiderView({
       {/* 左邊地圖 */}
       <div className="map-wrapper">
         <MapView
-          drivers={visibleDrivers}          // ✅ 只顯示已派給自己的司機
+          lang={lang}
+          drivers={drivers}
           orders={ordersWithLocations}
           mode="passenger"
           currentDriverId={null}
@@ -298,9 +394,9 @@ export default function RiderView({
             {t(lang, 'passengerMode')}
           </h1>
 
-          <div className="field-label">目前乘客：</div>
+          <div className="field-label">{t(lang, 'currentPassengerLabel')}</div>
           <div className="current-driver-box">
-            {currentUser?.username || '尚未登入'}
+            {currentUser?.username || t(lang, 'notLoggedIn')}
           </div>
 
           {/* 上車地點 */}
@@ -318,10 +414,7 @@ export default function RiderView({
                 setPickupLoc(null)
                 setPickupLocked(false)
                 setPickupSuggestions([])
-                setFareOptions(null)
-                setFareError('')
-                setLastDistanceKm(null)
-                setSelectedVehicle(null)
+                resetFarePanel()
               }}
             />
             {pickupSuggestions.length > 0 && (
@@ -340,6 +433,57 @@ export default function RiderView({
             )}
           </div>
 
+          {/* 中途停靠點 */}
+          {stops.map((stop, index) => (
+            <div key={index} style={{ marginTop: 12 }}>
+              <div className="field-label">
+                {t(lang, 'stopLabel')} {index + 1}
+              </div>
+              <div className="autocomplete-wrapper">
+                <input
+                  className="text-input"
+                  type="text"
+                  placeholder={t(lang, 'stopPlaceholder')}
+                  value={stop.text}
+                  onChange={e => updateStopText(index, e.target.value)}
+                />
+                {stop.suggestions && stop.suggestions.length > 0 && (
+                  <div className="autocomplete-dropdown">
+                    {stop.suggestions.map((item, sIdx) => (
+                      <button
+                        key={sIdx}
+                        type="button"
+                        className="autocomplete-item"
+                        onClick={() =>
+                          handleSelectStopSuggestion(index, item)
+                        }
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="ghost-btn"
+                style={{ marginTop: 4 }}
+                onClick={() => removeStop(index)}
+              >
+                {t(lang, 'removeStop')}
+              </button>
+            </div>
+          ))}
+
+          <button
+            type="button"
+            className="ghost-btn"
+            style={{ marginTop: 12 }}
+            onClick={addStop}
+          >
+            {t(lang, 'addStop')}
+          </button>
+
           {/* 目的地 */}
           <div className="field-label" style={{ marginTop: 16 }}>
             {t(lang, 'dropoffPlaceholder')}
@@ -355,10 +499,7 @@ export default function RiderView({
                 setDropoffLoc(null)
                 setDropoffLocked(false)
                 setDropoffSuggestions([])
-                setFareOptions(null)
-                setFareError('')
-                setLastDistanceKm(null)
-                setSelectedVehicle(null)
+                resetFarePanel()
               }}
             />
             {dropoffSuggestions.length > 0 && (
@@ -385,7 +526,7 @@ export default function RiderView({
             onClick={handleCheckPrice}
             disabled={loading}
           >
-            查看價格與車輛
+            {t(lang, 'viewPriceAndCars')}
           </button>
 
           {fareError && (
@@ -398,7 +539,8 @@ export default function RiderView({
             <div className="fare-panel" style={{ marginTop: 16 }}>
               {lastDistanceKm != null && (
                 <div className="field-label" style={{ marginBottom: 8 }}>
-                  預估距離：約 {lastDistanceKm} 公里
+                  {t(lang, 'estimatedDistancePrefix')} {lastDistanceKm}{' '}
+                  {t(lang, 'distanceKmUnit')}
                 </div>
               )}
               <ul className="fare-list">
@@ -443,7 +585,7 @@ export default function RiderView({
 
             {loading && (
               <div className="auth-hint" style={{ marginTop: 8 }}>
-                更新中…
+                {t(lang, 'loading')}
               </div>
             )}
             {error && <div className="error-box">{error}</div>}

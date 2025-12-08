@@ -1,7 +1,10 @@
 // src/LandingPage.jsx
 import './LandingPage.css'
+import { t, languages } from './i18n'
 
 export default function LandingPage({
+  lang,
+  onChangeLang,
   onPassengerClick,
   onDriverClick,
   onAuthClick,
@@ -25,7 +28,7 @@ export default function LandingPage({
 
           <div className="collapse navbar-collapse" id="navbarNav">
             <ul className="navbar-nav ms-auto">
-              {/* ⭐ 我是乘客 → 進入乘客端 */}
+              {/* 我是乘客 */}
               <li className="nav-item">
                 <a
                   className="nav-link active"
@@ -35,11 +38,11 @@ export default function LandingPage({
                     onPassengerClick?.()
                   }}
                 >
-                  我是乘客
+                  {t(lang, 'landingNavPassenger')}
                 </a>
               </li>
 
-              {/* ⭐ 我是司機 → 進入司機端 */}
+              {/* 我是司機 */}
               <li className="nav-item">
                 <a
                   className="nav-link"
@@ -49,11 +52,11 @@ export default function LandingPage({
                     onDriverClick?.()
                   }}
                 >
-                  我是司機
+                  {t(lang, 'landingNavDriver')}
                 </a>
               </li>
 
-              {/* ⭐ 登入 / 註冊 → 進入 AuthPage */}
+              {/* 登入 / 註冊 */}
               <li className="nav-item">
                 <a
                   className="nav-link btn btn-primary text-white ms-2 px-3"
@@ -63,10 +66,27 @@ export default function LandingPage({
                     onAuthClick?.()
                   }}
                 >
-                  登入 / 註冊
+                  {t(lang, 'landingNavAuth')}
                 </a>
               </li>
             </ul>
+
+            {/* 語言切換 */}
+            <div className="ms-3 d-flex align-items-center text-white">
+              <span className="small me-2">{t(lang, 'language')}：</span>
+              <select
+                className="form-select form-select-sm bg-dark text-white border-secondary"
+                style={{ width: 90 }}
+                value={lang}
+                onChange={e => onChangeLang?.(e.target.value)}
+              >
+                {languages.map(code => (
+                  <option key={code} value={code}>
+                    {code.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       </nav>
@@ -77,52 +97,57 @@ export default function LandingPage({
         <div className="container hero-content">
           <div className="row align-items-center">
             <div className="col-lg-6 text-white mb-5 mb-lg-0">
-              <h1 className="display-4 fw-bold">計程車派遣系統</h1>
+              <h1 className="display-4 fw-bold">
+                {t(lang, 'landingHeroTitle')}
+              </h1>
               <p className="lead mb-4">
-                利用大數據分析，讓您不浪費時間等待。
+                {t(lang, 'landingHeroSubtitle')}
               </p>
             </div>
 
             <div className="col-lg-5 offset-lg-1">
               <div className="booking-card">
-                <h3 className="fw-bold mb-4">去哪裡？</h3>
+                <h3 className="fw-bold mb-4">
+                  {t(lang, 'landingHeroWhereTo')}
+                </h3>
                 <form>
                   <div className="mb-3">
                     <label className="form-label text-muted small">
-                      上車地點
+                      {t(lang, 'landingHeroPickupLabel')}
                     </label>
                     <input
+                      key={`pickup-${lang}`} // 語言變更時重建 input，讓 defaultValue 也更新
                       type="text"
                       className="form-control form-control-lg"
-                      placeholder="輸入上車地址"
-                      defaultValue="目前位置"
+                      placeholder={t(lang, 'landingHeroPickupPlaceholder')}
+                      defaultValue={t(lang, 'landingHeroPickupDefault')}
                     />
                   </div>
                   <div className="mb-3">
                     <label className="form-label text-muted small">
-                      下車地點
+                      {t(lang, 'landingHeroDropoffLabel')}
                     </label>
                     <input
                       type="text"
                       className="form-control form-control-lg"
-                      placeholder="輸入目的地"
+                      placeholder={t(lang, 'landingHeroDropoffPlaceholder')}
                     />
                   </div>
 
                   {/* 預估金額（之後要用再打開） */}
                   <div id="price-estimate" className="mb-3 d-none">
                     <p className="fw-bold text-success">
-                      預估金額：$150 - $180
+                      {t(lang, 'landingHeroPriceExample')}
                     </p>
                   </div>
 
-                  {/* ⭐ 查看價格與車輛 → 直接進入乘客端 */}
+                  {/* 查看價格與車輛 → 直接進入乘客端 */}
                   <button
                     type="button"
                     className="btn btn-dark w-100 btn-lg py-3 fw-bold"
                     onClick={() => onPassengerClick?.()}
                   >
-                    查看價格與車輛
+                    {t(lang, 'landingHeroCta')}
                   </button>
                 </form>
               </div>
@@ -188,6 +213,87 @@ export default function LandingPage({
         </div>
     </section>
 
+      {/* 流程圖區塊 */}
+      <section className="how-it-works-section py-5 bg-white">
+        <div className="container text-center">
+          <div className="mb-5">
+            <span className="text-warning fw-bold text-uppercase ls-1">
+              {t(lang, 'landingHowTitleTag')}
+            </span>
+            <h2 className="fw-bold mt-2">
+              {t(lang, 'landingHowTitle')}
+            </h2>
+            <p className="text-muted">
+              {t(lang, 'landingHowSubtitle')}
+            </p>
+          </div>
+
+          <div className="row justify-content-center">
+            {/* Step 1 */}
+            <div className="col-md-4 mb-4 mb-md-0 position-relative">
+              <div className="step-card p-4">
+                <div className="icon-circle bg-warning text-dark mb-4 mx-auto d-flex align-items-center justify-content-center shadow">
+                  <i className="bi bi-geo-alt-fill fs-2" />
+                </div>
+                <h4 className="fw-bold">
+                  {t(lang, 'landingHowStep1Title')}
+                </h4>
+                <p className="text-muted">
+                  {t(lang, 'landingHowStep1Desc')}
+                </p>
+              </div>
+              <div className="d-none d-md-block position-absolute top-50 end-0 translate-middle-y text-muted">
+                <i className="bi bi-chevron-right fs-1" />
+              </div>
+            </div>
+
+            {/* Step 2 */}
+            <div className="col-md-4 mb-4 mb-md-0 position-relative">
+              <div className="step-card p-4">
+                <div className="icon-circle bg-dark text-warning mb-4 mx-auto d-flex align-items-center justify-content-center shadow">
+                  <i className="bi bi-cpu-fill fs-2" />
+                </div>
+                <h4 className="fw-bold">
+                  {t(lang, 'landingHowStep2Title')}
+                </h4>
+                <p className="text-muted">
+                  {t(lang, 'landingHowStep2Desc')}
+                </p>
+              </div>
+              <div className="d-none d-md-block position-absolute top-50 end-0 translate-middle-y text-muted">
+                <i className="bi bi-chevron-right fs-1" />
+              </div>
+            </div>
+
+            {/* Step 3 */}
+            <div className="col-md-4">
+              <div className="step-card p-4">
+                <div className="icon-circle bg-warning text-dark mb-4 mx-auto d-flex align-items-center justify-content-center shadow">
+                  <i className="bi bi-emoji-smile-fill fs-2" />
+                </div>
+                <h4 className="fw-bold">
+                  {t(lang, 'landingHowStep3Title')}
+                </h4>
+                <p className="text-muted">
+                  {t(lang, 'landingHowStep3Desc')}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <button
+              type="button"
+              className="btn btn-dark btn-lg px-5 rounded-pill shadow-sm"
+              onClick={() => onPassengerClick?.()}
+            >
+              {t(lang, 'landingHowCta')}
+              <i className="bi bi-arrow-right ms-2" />
+            </button>
+          </div>
+        </div>
+      </section>
+
       {/* 司機招募區塊 */}
       <section className="driver-section" id="driver">
         <div className="container">
@@ -201,39 +307,42 @@ export default function LandingPage({
             </div>
             <div className="col-md-6">
               <span className="badge bg-warning text-dark mb-2">
-                司機專屬
+                {t(lang, 'landingDriverBadge')}
               </span>
               <h2 className="fw-bold mb-3">
-                有預測需求指數
+                {t(lang, 'landingDriverTitleLine1')}
                 <br />
-                不讓你白跑一趟。
+                {t(lang, 'landingDriverTitleLine2')}
               </h2>
               <p className="text-muted">
-                我們的 APP 內建 <strong>AI 預測分數系統</strong>：
+                {t(lang, 'landingDriverIntro')}
               </p>
 
               <ul className="list-unstyled mt-4">
                 <li className="mb-3">
-                  <h5 className="fw-bold">🔥 熱點預測地圖</h5>
+                  <h5 className="fw-bold">
+                    {t(lang, 'landingDriverFeature1Title')}
+                  </h5>
                   <p className="small text-muted">
-                    地圖顏色深淺代表需求強度，直接導航至高分區域。
+                    {t(lang, 'landingDriverFeature1Desc')}
                   </p>
                 </li>
                 <li className="mb-3">
-                  <h5 className="fw-bold">📈 獲利分數 (Score)</h5>
+                  <h5 className="fw-bold">
+                    {t(lang, 'landingDriverFeature2Title')}
+                  </h5>
                   <p className="small text-muted">
-                    我們會為每條路線打分數，跟著高分走，空車率降低 30%。
+                    {t(lang, 'landingDriverFeature2Desc')}
                   </p>
                 </li>
               </ul>
 
-              {/* ⭐ 加入司機行列 → 進入司機端 */}
               <button
                 type="button"
                 className="btn btn-outline-dark mt-3"
                 onClick={() => onDriverClick?.()}
               >
-                加入司機行列
+                {t(lang, 'landingDriverCta')}
               </button>
             </div>
           </div>
@@ -243,13 +352,19 @@ export default function LandingPage({
       {/* footer */}
       <footer className="bg-dark text-white py-5 text-center">
         <div className="container">
-          <h3 className="mb-4">立即體驗智慧派遣</h3>
+          <h3 className="mb-4">
+            {t(lang, 'landingFooterTitle')}
+          </h3>
           <div className="d-flex justify-content-center gap-3">
-            <button className="btn btn-light btn-lg">🍎 iOS 下載</button>
-            <button className="btn btn-light btn-lg">🤖 Android 下載</button>
+            <button className="btn btn-light btn-lg">
+              {t(lang, 'landingFooterIos')}
+            </button>
+            <button className="btn btn-light btn-lg">
+              {t(lang, 'landingFooterAndroid')}
+            </button>
           </div>
           <p className="mt-5 text-white-50 small">
-            © 2025 SmartDispatch Project. Department of Computer Science.
+            {t(lang, 'landingFooterCopyright')}
           </p>
         </div>
       </footer>
