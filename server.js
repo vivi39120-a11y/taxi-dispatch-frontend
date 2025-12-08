@@ -56,35 +56,35 @@ const DRIVER_START_POSITIONS = [
 ]
 let nextStartIndex = 0
 
-// 🔻 Geocode 失敗時的備用地點（讓線上版至少會有幾個選項）
+// 🔹 當外部 geocode 掛掉時，用的固定 demo 地點（和你本機常用的點一致）
 const FALLBACK_GEOCODE_PLACES = [
   {
-    label: 'Times Square, Manhattan, New York, NY',
+    label: 'Times Square, Manhattan, New York, NY, USA',
     lat: 40.7580,
     lng: -73.9855,
   },
   {
-    label: 'Central Park, Manhattan, New York, NY',
-    lat: 40.7812,
-    lng: -73.9665,
+    label: 'Central Park, Manhattan, New York, NY, USA',
+    lat: 40.7829,
+    lng: -73.9654,
   },
   {
-    label: 'Grand Central Terminal, Manhattan, New York, NY',
+    label: 'Grand Central Terminal, Manhattan, New York, NY, USA',
     lat: 40.7527,
     lng: -73.9772,
   },
   {
-    label: 'Wall Street, Manhattan, New York, NY',
+    label: 'Wall Street, Manhattan, New York, NY, USA',
     lat: 40.7060,
     lng: -74.0086,
   },
   {
-    label: 'JFK International Airport, New York, NY',
+    label: 'John F. Kennedy International Airport (JFK), New York, NY, USA',
     lat: 40.6413,
     lng: -73.7781,
   },
   {
-    label: 'LaGuardia Airport, Queens, New York, NY',
+    label: 'LaGuardia Airport (LGA), New York, NY, USA',
     lat: 40.7769,
     lng: -73.8740,
   },
@@ -171,11 +171,14 @@ app.post('/api/login', (req, res) => {
 })
 
 // =================== Geocode API ===================
+// 線上希望「盡量跟本機一樣」：
+// 1. 先真的打 Nominatim（和本機邏輯一樣）。
+// 2. 如果 Render 那邊被擋掉 / 失敗，就回固定的 demo 地點（至少下拉不會空）。
 app.get('/api/geocode', async (req, res) => {
   const q = req.query.q
   const query = (q || '').trim()
 
-  // 沒輸入就直接回空陣列（避免 400）
+  // 沒輸入就不查，直接回空陣列（和本機 UX 一樣）
   if (!query) {
     return res.json([])
   }
@@ -187,7 +190,7 @@ app.get('/api/geocode', async (req, res) => {
 
     const response = await fetch(url, {
       headers: {
-        // 有聯絡資訊的 User-Agent，比較不會被 Nominatim 擋
+        // 一定要帶 User-Agent，不然 Nominatim 會直接擋
         'User-Agent': 'taxi-dispatch-demo/1.0 (vivi39120@gmail.com)',
       },
     })
@@ -198,6 +201,7 @@ app.get('/api/geocode', async (req, res) => {
 
     const data = await response.json()
 
+    // 正常情況：跟本機一樣，回真實 geocode 結果
     const results = data.map(item => ({
       label: item.display_name,
       lat: parseFloat(item.lat),
@@ -206,15 +210,10 @@ app.get('/api/geocode', async (req, res) => {
 
     return res.json(results)
   } catch (err) {
-    // 線上如果 Nominatim 掛掉 / 被擋，改用本機 fallback，不要 500
-    console.error('Geocode failed, using fallback data:', err)
+    console.error('Geocode failed, using fallback demo places:', err)
 
-    const keyword = query.toLowerCase()
-    const fallback = FALLBACK_GEOCODE_PLACES.filter(p =>
-      p.label.toLowerCase().includes(keyword)
-    )
-
-    return res.json(fallback)
+    // 緊急備援：外部 geocode 掛掉時，回幾個示範地點，避免完全沒有下拉
+    return res.json(FALLBACK_GEOCODE_PLACES)
   }
 })
 
@@ -283,7 +282,7 @@ app.post('/api/orders', (req, res) => {
     vehicleType,
     estimatedFare,   // 可能從舊版前端來
     estimatedPrice,  // 新版前端用的名稱
-    stops,           // ⭐ 中途停靠點 [{label,lat,lng} 或 {text,loc} 之類]
+    stops,           // ⭐ 中途停靠點
   } = req.body
 
   if (!pickup || !dropoff) {
@@ -341,9 +340,9 @@ app.post('/api/orders', (req, res) => {
 
     distanceKm: typeof distanceKm === 'number' ? distanceKm : null,
     vehicleType: normalizeType(vehicleType),
-    estimatedPrice: finalPrice,          // 主欄位
-    estimatedFare: finalPrice,           // 兼容舊欄位
-    stops: normalizedStops,              // ⭐ 中途停靠點
+    estimatedPrice: finalPrice,
+    estimatedFare: finalPrice,
+    stops: normalizedStops,
     createdAt: new Date().toISOString(),
   }
 
