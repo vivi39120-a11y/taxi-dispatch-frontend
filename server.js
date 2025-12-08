@@ -5,6 +5,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import fetch from 'node-fetch'
 
+const fetch = require('node-fetch');
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
@@ -137,40 +138,56 @@ app.post('/api/login', (req, res) => {
 
 // =================== Geocode API ===================
 app.get('/api/geocode', async (req, res) => {
-  const q = req.query.q
-  if (!q || q.trim() === '') {
-    return res.status(400).json({ error: '缺少查詢字串 q' })
+  const q = (req.query.q || '').trim();
+
+  if (!q) {
+    return res.status(400).json({
+      ok: false,
+      error: 'missing-query',
+      message: 'Query is required',
+    });
   }
 
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(
-      q
-    )}`
+    const url =
+      'https://nominatim.openstreetmap.org/search?' +
+      'format=json&addressdetails=1&limit=5&q=' +
+      encodeURIComponent(q);
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'taxi-dispatch-demo/1.0 (vivi39120@gmail.com)',
+        // Nominatim 要求一定要有 User-Agent，不然有機會 403 / 500
+        'User-Agent': 'ny-taxi-demo/1.0 (example@example.com)',
       },
-    })
+    });
 
     if (!response.ok) {
-      throw new Error(`Nominatim error: ${response.status}`)
+      const text = await response.text().catch(() => '');
+      console.error('Geocode upstream error', response.status, text);
+      return res.status(500).json({
+        ok: false,
+        error: 'geocode-upstream-failed',
+      });
     }
 
-    const data = await response.json()
+    const data = await response.json();
 
     const results = data.map(item => ({
-      label: item.display_name,
+      displayName: item.display_name,
       lat: parseFloat(item.lat),
-      lng: parseFloat(item.lon),
-    }))
+      lon: parseFloat(item.lon),
+    }));
 
-    res.json(results)
+    res.json({ ok: true, results });
   } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: '地理編碼失敗' })
+    console.error('Geocode exception', err);
+    res.status(500).json({
+      ok: false,
+      error: 'geocode-exception',
+    });
   }
-})
+});
+
 
 // =================== 司機登入 / 位置 ===================
 
