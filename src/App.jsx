@@ -29,7 +29,6 @@ export default function App() {
   const [showLanding, setShowLanding] = useState(getInitialShowLandingFromUrl)
   const [showAuth, setShowAuth] = useState(false)
 
-  // ✅ 帳號：只記錄「目前登入者」，真正帳號存在 server.js
   // currentUser: { id, username, role, carType }
   const [currentUser, setCurrentUser] = useState(null)
 
@@ -58,17 +57,17 @@ export default function App() {
       setOrders(oData)
     } catch (err) {
       console.error(err)
-      setError('目前無法連線到伺服器，請稍後再試。')
+      setError(t(lang, 'cannotConnectServer'))
     }
   }
 
   useEffect(() => {
     fetchAll()
-    const timer = setInterval(fetchAll, 3000) // 每 3 秒同步一次
+    const timer = setInterval(fetchAll, 3000)
     return () => clearInterval(timer)
   }, [])
 
-  // ===== 訂單 + 座標（優先使用 server 給的經緯度）=====
+  // ===== 訂單 + 座標 =====
   const ordersWithLocations = useMemo(
     () =>
       orders.map(o => {
@@ -99,7 +98,7 @@ export default function App() {
     return orders.filter(o => o.customer === currentUser.username)
   }, [orders, currentUser])
 
-  // 目前登入乘客自己的訂單 + 座標（直接從 ordersWithLocations 過濾）
+  // 目前登入乘客自己的訂單 + 座標
   const passengerOrdersWithLoc = useMemo(() => {
     if (!currentUser || currentUser.role !== 'passenger') return []
     return ordersWithLocations.filter(
@@ -111,21 +110,21 @@ export default function App() {
   const driverOrdersWithLoc = ordersWithLocations
 
   // ===== 乘客下單 =====
-  // pickup / dropoff：顯示用文字
-  // pickupLoc / dropoffLoc：{lat, lng}
-  // fareInfo：{ vehicleType, distanceKm, price }
   const createOrder = async (
     pickup,
     dropoff,
     pickupLoc,
     dropoffLoc,
-    fareInfo
+    fareInfo,
+    stops = []
   ) => {
     if (!pickup.trim() || !dropoff.trim()) return
     if (!currentUser || currentUser.role !== 'passenger') {
-      alert('請先以乘客身分登入')
+      alert(t(lang, 'needLoginPassenger'))
       return
     }
+
+    const safeStops = Array.isArray(stops) ? stops : []
 
     setLoading(true)
     setError('')
@@ -143,9 +142,9 @@ export default function App() {
           dropoffLng: dropoffLoc?.lng ?? null,
           vehicleType: fareInfo?.vehicleType || null,
           distanceKm: fareInfo?.distanceKm ?? null,
-          // 後端主要用 estimatedFare；estimatedPrice 給舊欄位相容
           estimatedFare: fareInfo?.price ?? null,
           estimatedPrice: fareInfo?.price ?? null,
+          stops: safeStops,
         }),
       })
       if (!res.ok) {
@@ -156,7 +155,7 @@ export default function App() {
       setOrders(prev => [...prev, order])
     } catch (err) {
       console.error(err)
-      setError('下單失敗，請稍後再試。')
+      setError(t(lang, 'createOrderFailed'))
     } finally {
       setLoading(false)
     }
@@ -165,11 +164,11 @@ export default function App() {
   // ===== 司機接單 =====
   const acceptOrder = async orderId => {
     if (!currentUser || currentUser.role !== 'driver') {
-      alert('請先以司機身分登入')
+      alert(t(lang, 'needLoginDriver'))
       return
     }
     if (!currentDriverId) {
-      alert('尚未綁定司機車輛，請重新登入司機或稍後再試')
+      alert(t(lang, 'driverVehicleNotAttached'))
       return
     }
 
@@ -201,7 +200,7 @@ export default function App() {
       )
     } catch (err) {
       console.error(err)
-      setError('接單失敗，請稍後再試。')
+      setError(t(lang, 'acceptOrderFailed'))
     } finally {
       setLoading(false)
     }
@@ -217,7 +216,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: user.username,
-          carType: user.carType || null, // 後端會自己做大寫 normalize
+          carType: user.carType || null,
         }),
       })
       if (!res.ok) throw new Error('driver-login failed')
@@ -229,7 +228,7 @@ export default function App() {
       })
     } catch (err) {
       console.error(err)
-      setError('無法建立司機車輛，請稍後再試。')
+      setError(t(lang, 'attachDriverFailed'))
     }
   }
 
@@ -269,11 +268,9 @@ export default function App() {
           )
 
           if (distToPickup > EPSILON) {
-            // 還沒到上車點，先去接客人
             targetLat = pickupLocation.lat
             targetLng = pickupLocation.lng
           } else {
-            // 到了上車點，再往目的地跑
             targetLat = dropoffLocation.lat
             targetLng = dropoffLocation.lng
           }
@@ -298,7 +295,6 @@ export default function App() {
         const newDrivers = [...prevDrivers]
         newDrivers[idx] = { ...myDriver, lat, lng }
 
-        // 把最新座標回寫到 server，讓乘客那邊地圖也更新
         fetch(`/api/drivers/${currentDriverId}/location`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -312,9 +308,8 @@ export default function App() {
     return () => clearInterval(timer)
   }, [simulateVehicles, currentUser, currentDriverId, driverOrdersWithLoc])
 
-  // ===== Auth：註冊 / 登入（改成呼叫後端）=====
+  // ===== Auth：註冊 / 登入（呼叫後端）=====
 
-  // 註冊：呼叫 /api/register
   const registerUser = async ({ username, password, role, carType }) => {
     try {
       const res = await fetch('/api/register', {
@@ -328,15 +323,28 @@ export default function App() {
         }),
       })
 
+      const data = await res.json().catch(() => ({}))
+
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
+        // 後端 errorCode -> 對應多語系 key
+        let key = null
+        switch (data.errorCode) {
+          case 'USERNAME_TAKEN':
+            key = 'errorUsernameTaken'
+            break
+          case 'MISSING_FIELDS':
+            key = 'errorMissingFields'
+            break
+          default:
+            key = 'registerFailed'
+        }
         return {
           ok: false,
-          message: data.error || '註冊失敗，請稍後再試。',
+          message: t(lang, key),
         }
       }
 
-      const user = await res.json() // {id, username, role, carType}
+      const user = data
       setCurrentUser(user)
 
       if (user.role === 'driver') {
@@ -351,11 +359,10 @@ export default function App() {
       return { ok: true }
     } catch (err) {
       console.error(err)
-      return { ok: false, message: '無法連線伺服器，請稍後再試。' }
+      return { ok: false, message: t(lang, 'networkError') }
     }
   }
 
-  // 登入：呼叫 /api/login
   const loginUser = async ({ username, password }) => {
     try {
       const res = await fetch('/api/login', {
@@ -364,15 +371,31 @@ export default function App() {
         body: JSON.stringify({ username, password }),
       })
 
+      const data = await res.json().catch(() => ({}))
+
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
+        // 注意：後端是 NO_SUCH_ACCOUNT，不是 USER_NOT_FOUND
+        let key = null
+        switch (data.errorCode) {
+          case 'MISSING_FIELDS':
+            key = 'errorMissingFields'
+            break
+          case 'NO_SUCH_ACCOUNT':
+            key = 'errorUserNotFound'
+            break
+          case 'WRONG_PASSWORD':
+            key = 'errorWrongPassword'
+            break
+          default:
+            key = 'loginFailed'
+        }
         return {
           ok: false,
-          message: data.error || '登入失敗，請稍後再試。',
+          message: t(lang, key),
         }
       }
 
-      const user = await res.json()
+      const user = data
       setCurrentUser(user)
 
       if (user.role === 'driver') {
@@ -387,7 +410,7 @@ export default function App() {
       return { ok: true }
     } catch (err) {
       console.error(err)
-      return { ok: false, message: '無法連線伺服器，請稍後再試。' }
+      return { ok: false, message: t(lang, 'networkError') }
     }
   }
 
@@ -409,6 +432,8 @@ export default function App() {
   if (showLanding) {
     return (
       <LandingPage
+        lang={lang}
+        onChangeLang={setLang}
         onPassengerClick={() => {
           setMode('rider')
           setShowLanding(false)
@@ -430,7 +455,7 @@ export default function App() {
       <div className="app-root">
         <header className="top-bar">
           <div className="top-bar-left">
-            <span className="app-title">NY Taxi Demo</span>
+            <span className="app-title">{t(lang, 'appTitle')}</span>
           </div>
 
           <div className="top-bar-center" />
@@ -439,8 +464,8 @@ export default function App() {
             {currentUser && (
               <span className="header-user-label">
                 {currentUser.role === 'driver'
-                  ? `司機：${currentUser.username}`
-                  : `乘客：${currentUser.username}`}
+                  ? `${t(lang, 'driverPrefix')}${currentUser.username}`
+                  : `${t(lang, 'passengerPrefix')}${currentUser.username}`}
               </span>
             )}
 
@@ -451,11 +476,11 @@ export default function App() {
                 window.location.href = '/'
               }}
             >
-              回首頁
+              {t(lang, 'backHome')}
             </button>
 
             <div className="lang-switch">
-              <span className="lang-label">語言：</span>
+              <span className="lang-label">{t(lang, 'language')}：</span>
               <select value={lang} onChange={e => setLang(e.target.value)}>
                 <option value="zh">ZH</option>
                 <option value="en">EN</option>
@@ -469,13 +494,16 @@ export default function App() {
               className="sim-toggle-btn"
               onClick={() => setSimulateVehicles(v => !v)}
             >
-              {simulateVehicles ? '停止車輛模擬' : '啟動車輛模擬'}
+              {simulateVehicles
+                ? t(lang, 'stopVehicleSim')
+                : t(lang, 'startVehicleSim')}
             </button>
           </div>
         </header>
 
         <main className="auth-main">
           <AuthPage
+            lang={lang}
             onBack={() => {
               setShowAuth(false)
               setShowLanding(true)
@@ -492,19 +520,17 @@ export default function App() {
   return (
     <div className="app-root">
       <header className="app-header">
-        <div className="app-title">NY Taxi Demo</div>
+        <div className="app-title">{t(lang, 'appTitle')}</div>
 
         <div className="app-header-controls">
-          {/* 顯示目前登入身分：乘客：xxx 或 司機：yyy */}
           {currentUser && (
             <span className="header-user-label">
               {currentUser.role === 'driver'
-                ? `司機：${currentUser.username}`
-                : `乘客：${currentUser.username}`}
+                ? `${t(lang, 'driverPrefix')}${currentUser.username}`
+                : `${t(lang, 'passengerPrefix')}${currentUser.username}`}
             </span>
           )}
 
-          {/* 回首頁按鈕 */}
           <button
             className="header-back-btn"
             type="button"
@@ -513,10 +539,9 @@ export default function App() {
             }}
             style={{ marginLeft: 8 }}
           >
-            回首頁
+            {t(lang, 'backHome')}
           </button>
 
-          {/* 語言切換 */}
           <div className="lang-select" style={{ marginLeft: 16 }}>
             <span className="lang-label">{t(lang, 'language')}：</span>
             <select value={lang} onChange={e => setLang(e.target.value)}>
@@ -528,14 +553,15 @@ export default function App() {
             </select>
           </div>
 
-          {/* 車輛模擬開關 */}
           <button
             className="ghost-btn"
             type="button"
             onClick={() => setSimulateVehicles(v => !v)}
             style={{ marginLeft: 8 }}
           >
-            {simulateVehicles ? '停止車輛模擬' : '啟動車輛模擬'}
+            {simulateVehicles
+              ? t(lang, 'stopVehicleSim')
+              : t(lang, 'startVehicleSim')}
           </button>
         </div>
       </header>

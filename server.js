@@ -31,9 +31,13 @@ let drivers = []
 //   customer,
 //   status,        // 'pending' | 'assigned'
 //   driverId, driverName,
-//   distanceKm,    // 預估距離
+//   distanceKm,    // 預估距離（整趟，含停靠點）
 //   vehicleType,   // 'YELLOW' | 'GREEN' | 'FHV'
-//   estimatedFare, // 預估價格
+//   estimatedPrice,// 預估價格（同時也寫到 estimatedFare 以保留相容性）
+//   estimatedFare,
+//   stops: [       // ⭐ 中途停靠點 { label, lat, lng }
+//     ...
+//   ],
 //   createdAt
 // }
 let orders = []
@@ -70,13 +74,19 @@ app.post('/api/register', (req, res) => {
   const { username, password, role, carType } = req.body
 
   if (!username || !password || !role) {
-    return res.status(400).json({ error: '缺少必要欄位（username / password / role）' })
+    return res.status(400).json({
+      errorCode: 'MISSING_FIELDS',
+      error: 'username / password / role required',
+    })
   }
 
   const existed = users.find(u => u.username === username)
   if (existed) {
     // 帳號重複 → 409 Conflict
-    return res.status(409).json({ error: '此帳號名稱已被使用，請改用其他名稱。' })
+    return res.status(409).json({
+      errorCode: 'USERNAME_TAKEN',
+      error: 'Username already taken',
+    })
   }
 
   const carTypeUpper =
@@ -85,8 +95,8 @@ app.post('/api/register', (req, res) => {
   const user = {
     id: nextUserId++,
     username,
-    password,       // Demo 用：實務上要做 hash
-    role,           // 'passenger' | 'driver'
+    password, // Demo 用：實務上要做 hash
+    role,     // 'passenger' | 'driver'
     carType: carTypeUpper,
   }
   users.push(user)
@@ -101,15 +111,24 @@ app.post('/api/register', (req, res) => {
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body
   if (!username || !password) {
-    return res.status(400).json({ error: '請輸入帳號與密碼。' })
+    return res.status(400).json({
+      errorCode: 'MISSING_FIELDS',
+      error: 'username / password required',
+    })
   }
 
   const user = users.find(u => u.username === username)
   if (!user) {
-    return res.status(400).json({ error: '查無此帳號，請先註冊。' })
+    return res.status(400).json({
+      errorCode: 'USER_NOT_FOUND',
+      error: 'Account not found',
+    })
   }
   if (user.password !== password) {
-    return res.status(400).json({ error: '密碼錯誤，請再試一次。' })
+    return res.status(400).json({
+      errorCode: 'WRONG_PASSWORD',
+      error: 'Wrong password',
+    })
   }
 
   const { password: _, ...safeUser } = user
@@ -155,6 +174,7 @@ app.get('/api/geocode', async (req, res) => {
 
 // =================== 司機登入 / 位置 ===================
 
+// 司機登入（或註冊）＋給定初始位置
 app.post('/api/driver-login', (req, res) => {
   const { name, carType } = req.body
   if (!name) return res.status(400).json({ error: 'name is required' })
@@ -204,6 +224,7 @@ app.patch('/api/drivers/:id/location', (req, res) => {
 
 // =================== 訂單 API ===================
 
+// 建立訂單（含中途停靠點）
 app.post('/api/orders', (req, res) => {
   const {
     pickup,
@@ -215,12 +236,50 @@ app.post('/api/orders', (req, res) => {
     dropoffLng,
     distanceKm,
     vehicleType,
-    estimatedFare,
+    estimatedFare,   // 可能從舊版前端來
+    estimatedPrice,  // 新版前端用的名稱
+    stops,           // ⭐ 中途停靠點 [{label,lat,lng} 或 {text,loc} 之類]
   } = req.body
 
   if (!pickup || !dropoff) {
     return res.status(400).json({ error: 'pickup & dropoff are required' })
   }
+
+  // ⭐ 正規化中途停靠點： [{ label, lat, lng }, ...]
+  const normalizedStops = Array.isArray(stops)
+    ? stops.map(s => {
+        const label =
+          typeof s.label === 'string'
+            ? s.label
+            : typeof s.text === 'string'
+            ? s.text
+            : ''
+
+        const lat =
+          typeof s.lat === 'number'
+            ? s.lat
+            : s.loc && typeof s.loc.lat === 'number'
+            ? s.loc.lat
+            : null
+
+        const lng =
+          typeof s.lng === 'number'
+            ? s.lng
+            : s.loc && typeof s.loc.lng === 'number'
+            ? s.loc.lng
+            : null
+
+        return { label, lat, lng }
+      })
+    : []
+
+  // 估價欄位：兩個名字擇一
+  const finalPrice =
+    typeof estimatedPrice === 'number'
+      ? estimatedPrice
+      : typeof estimatedFare === 'number'
+      ? estimatedFare
+      : null
 
   const order = {
     id: nextOrderId++,
@@ -234,10 +293,12 @@ app.post('/api/orders', (req, res) => {
     status: 'pending',
     driverId: null,
     driverName: null,
+
     distanceKm: typeof distanceKm === 'number' ? distanceKm : null,
     vehicleType: normalizeType(vehicleType),
-    estimatedFare:
-      typeof estimatedFare === 'number' ? estimatedFare : null,
+    estimatedPrice: finalPrice, // 主欄位
+    estimatedFare: finalPrice,  // 兼容舊欄位
+    stops: normalizedStops,     // ⭐ 中途停靠點
     createdAt: new Date().toISOString(),
   }
 
