@@ -7,6 +7,7 @@ import DriverView from './views/DriverView.jsx'
 import AuthPage from './views/AuthPage.jsx'
 import LandingPage from './LandingPage.jsx'
 import { resolveLocation } from './locationResolver.js'
+import DriverPage from './DriverPage.jsx'
 
 // 從網址判斷一開始顯示乘客端 / 司機端 / 首頁
 function getInitialModeFromUrl() {
