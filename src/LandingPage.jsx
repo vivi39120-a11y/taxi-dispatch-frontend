@@ -290,6 +290,25 @@ export default function LandingPage({
               </button>
             </div>
           </div>
+          {/* 加入熱力圖模型 */}
+          <div className="row mt-5">
+            <div className="col-12">
+              <div className="heatmap-container bg-white p-3 rounded shadow-sm">
+                <h3 className="fw-bold mb-3 text-center">🔥 即時熱點：下一個小時去哪裡載客？</h3>
+                <p className="text-muted text-center mb-4">下方地圖顯示 AI 預測未來一小時的高需求區域，點擊區域查看建議路線與預估收益。</p>
+                
+                <iframe 
+                  src="/driver-map.html" 
+                  title="Driver Demand Heatmap"
+                  className="heatmap-iframe"
+                ></iframe>
+                
+                <div className="text-center mt-3">
+                    <small className="text-muted">資料更新時間：2025-12-08 14:00 (範例)</small>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
