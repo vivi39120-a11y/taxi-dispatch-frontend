@@ -29,6 +29,7 @@ export default function App() {
   const [mode, setMode] = useState(getInitialModeFromUrl)
   const [showLanding, setShowLanding] = useState(getInitialShowLandingFromUrl)
   const [showAuth, setShowAuth] = useState(false)
+  const [showHeatmap, setShowHeatmap] = useState(false)
 
   // currentUser: { id, username, role, carType }
   const [currentUser, setCurrentUser] = useState(null)
@@ -451,6 +452,14 @@ export default function App() {
     )
   }
 
+  if (showHeatmap) {
+    return (
+      <DriverPage 
+        onBack={() => setShowHeatmap(false)} 
+      />
+    )
+  }
+
   if (showAuth) {
     return (
       <div className="app-root">
@@ -530,6 +539,16 @@ export default function App() {
                 ? `${t(lang, 'driverPrefix')}${currentUser.username}`
                 : `${t(lang, 'passengerPrefix')}${currentUser.username}`}
             </span>
+          )}
+
+          {currentUser && currentUser.role === 'driver' && (
+            <button
+              className="ghost-btn"
+              style={{ marginLeft: 8, borderColor: '#ff9800', color: '#ff9800' }}
+              onClick={() => setShowHeatmap(true)}
+            >
+              熱點地圖
+            </button>
           )}
 
           <button
