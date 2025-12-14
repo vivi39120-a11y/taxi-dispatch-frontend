@@ -124,10 +124,10 @@ const messages = {
     landingDriverTitleLine1: '有預測需求指數',
     landingDriverTitleLine2: '不讓你白跑一趟。',
     landingDriverIntro: '我們的 APP 內建 AI 預測分數系統：',
-    landingDriverFeature1Title: '🔥 熱點預測地圖',
+    landingDriverFeature1Title: ' 熱點預測地圖',
     landingDriverFeature1Desc:
       '地圖顏色深淺代表需求強度，直接導航至高分區域。',
-    landingDriverFeature2Title: '📈 獲利分數 (Score)',
+    landingDriverFeature2Title: ' 獲利分數 (Score)',
     landingDriverFeature2Desc:
       '我們會為每條路線打分數，跟著高分走，空車率降低 30%。',
     landingDriverCta: '加入司機行列',
@@ -266,10 +266,10 @@ const messages = {
     landingDriverTitleLine2: 'No more wasted empty trips.',
     landingDriverIntro:
       'Our app includes an AI demand prediction scoring system:',
-    landingDriverFeature1Title: '🔥 Hotspot heatmap',
+    landingDriverFeature1Title: ' Hotspot heatmap',
     landingDriverFeature1Desc:
       'Map colors represent demand strength, guiding you directly to high-score zones.',
-    landingDriverFeature2Title: '📈 Profit score',
+    landingDriverFeature2Title: ' Profit score',
     landingDriverFeature2Desc:
       'We score every route. Follow high-score routes and cut empty miles by 30%.',
     landingDriverCta: 'Join as a driver',
@@ -405,10 +405,10 @@ const messages = {
     landingDriverTitleLine1: '수요 예측 지수로',
     landingDriverTitleLine2: '헛운행을 줄여 드립니다.',
     landingDriverIntro: '앱에는 AI 수요 예측 점수 시스템이 내장되어 있습니다:',
-    landingDriverFeature1Title: '🔥 수요 핫스팟 지도',
+    landingDriverFeature1Title: ' 수요 핫스팟 지도',
     landingDriverFeature1Desc:
       '지도 색으로 수요 강도를 표시해 고수요 지역으로 바로 안내합니다.',
-    landingDriverFeature2Title: '📈 수익 점수 (Score)',
+    landingDriverFeature2Title: ' 수익 점수 (Score)',
     landingDriverFeature2Desc:
       '각 노선에 점수를 매겨 높은 점수 위주로 운행하면 공차율이 30% 감소합니다.',
     landingDriverCta: '기사로 참여하기',
@@ -549,10 +549,10 @@ const messages = {
     landingDriverTitleLine1: '需要予測スコアで',
     landingDriverTitleLine2: 'ムダな空車走行を削減。',
     landingDriverIntro: 'アプリには AI 需要予測スコア機能を搭載：',
-    landingDriverFeature1Title: '🔥 ホットスポットマップ',
+    landingDriverFeature1Title: ' ホットスポットマップ',
     landingDriverFeature1Desc:
       '地図の色で需要の強さを可視化し、稼げるエリアへ直接ナビします。',
-    landingDriverFeature2Title: '📈 収益スコア (Score)',
+    landingDriverFeature2Title: ' 収益スコア (Score)',
     landingDriverFeature2Desc:
       '各ルートにスコアを付け、高スコアのルートを走ることで空車率を 30% 削減します。',
     landingDriverCta: 'ドライバーとして参加',
