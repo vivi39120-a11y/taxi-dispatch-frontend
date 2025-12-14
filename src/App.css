@@ -101,3 +101,24 @@
   justify-content: center;
   border: 2px solid #ffffff;
 }
+.taxi-marker,
+.passenger-marker,
+.dropoff-marker {
+  font-size: 24px;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.7);
+}
+
+.stop-marker-inner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #00bcd4;
+  color: #fff;
+  font-weight: bold;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+}

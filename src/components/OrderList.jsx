@@ -6,15 +6,9 @@ export default function OrderList({
   isDriverView = false,
   onAcceptOrder,
   drivers = [],
-  currentDriverId,
+  currentDriverId, // 目前沒用到，但保留參數
 }) {
-  // 目前登入這台司機車（只在司機端需要）
-  const myDriver =
-    isDriverView && currentDriverId != null
-      ? drivers.find(d => d.id === currentDriverId)
-      : null
-
-  // ===== 小工具：Haversine 算兩點距離（km）=====
+  // 備援用的距離計算（km）
   function distanceKm(a, b) {
     if (!a || !b) return null
     const toRad = d => (d * Math.PI) / 180
@@ -31,39 +25,11 @@ export default function OrderList({
 
     const c = 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s))
     const d = R * c
-    return Math.round(d * 10) / 10 // 取到小數一位
+    return d
   }
 
-  // ===== 司機端：計算派遣分數（1~10，距離越近分數越高）=====
-  function calcDispatchScore(order) {
-    if (!isDriverView) return null
-    if (!myDriver) return null
-
-    // 優先用 order.pickupLocation，其次用 pickupLat/pickupLng，再退回舊的 resolveLocation
-    const pickupLoc =
-      order.pickupLocation ||
-      (typeof order.pickupLat === 'number' &&
-      typeof order.pickupLng === 'number'
-        ? { lat: order.pickupLat, lng: order.pickupLng }
-        : resolveLocation(order.pickup))
-
-    if (!pickupLoc) return null
-
-    const dx = pickupLoc.lat - myDriver.lat
-    const dy = pickupLoc.lng - myDriver.lng
-    const dist = Math.hypot(dx, dy)
-
-    // 這裡假設 0km ~ 10km 映射到 10→1 分
-    const MAX_DIST = 0.1 // 約 10km（視你地圖範圍微調）
-    const ratio = Math.min(dist / MAX_DIST, 1) // 0~1
-    const normalized = 1 - ratio // 近:1, 遠:0
-    const score = 1 + normalized * 9
-    return Math.round(score)
-  }
-
-  // ===== 共用：計算這筆訂單的距離（km）=====
-  function calcOrderDistance(order) {
-    // 如果後端有存 distanceKm 就直接用
+  // 共用：取得訂單距離（km）
+  function getDistanceKm(order) {
     if (typeof order.distanceKm === 'number') {
       return order.distanceKm
     }
@@ -82,31 +48,18 @@ export default function OrderList({
         ? { lat: order.dropoffLat, lng: order.dropoffLng }
         : resolveLocation(order.dropoff))
 
-    return distanceKm(pickupLoc, dropoffLoc)
+    if (!pickupLoc || !dropoffLoc) return null
+
+    const d = distanceKm(pickupLoc, dropoffLoc)
+    return d != null ? Math.round(d * 10) / 10 : null
   }
 
-  // ===== 共用：依車種＋距離算預估價格 =====
-  function calcEstimatedFare(order, distKm) {
-    if (typeof distKm !== 'number' || distKm <= 0) return null
-
-    const type = (order.vehicleType || '').toUpperCase()
-    let base = 0
-    let perKm = 0
-
-    if (type === 'YELLOW') {
-      base = 70
-      perKm = 25
-    } else if (type === 'GREEN') {
-      base = 60
-      perKm = 22
-    } else if (type === 'FHV') {
-      base = 90
-      perKm = 30
-    } else {
-      return null
-    }
-
-    return Math.round(base + perKm * distKm)
+  // 共用：取得訂單價格（USD）
+  function getPrice(order) {
+    if (typeof order.price === 'number') return order.price
+    if (typeof order.estimatedFare === 'number') return order.estimatedFare
+    if (typeof order.estimatedPrice === 'number') return order.estimatedPrice
+    return null
   }
 
   return (
@@ -119,12 +72,17 @@ export default function OrderList({
           (driverObj && driverObj.name) ||
           (order.driverId != null ? `Driver #${order.driverId}` : '未知司機')
 
-        const dispatchScore = calcDispatchScore(order)
-        const distKm = calcOrderDistance(order)
-        const estimatedFare = calcEstimatedFare(order, distKm)
+        const distKm = getDistanceKm(order)
+        const price = getPrice(order)
+
         const vehicleLabel = order.vehicleType
           ? order.vehicleType.toUpperCase()
           : null
+
+        const dispatchScore =
+          isDriverView && typeof order.dispatchScore === 'number'
+            ? order.dispatchScore
+            : null
 
         return (
           <li key={order.id} className="order-item">
@@ -141,19 +99,21 @@ export default function OrderList({
                   : order.status}
               </div>
 
-              {/* 下面這一行：車種 / 距離 / 預估價格 / 派遣分數 */}
+              {/* 車種 / 距離 / 預估價格 / 派遣分數 */}
               <div className="order-meta">
                 {vehicleLabel && <span>車種：{vehicleLabel}</span>}
                 {typeof distKm === 'number' && (
                   <span>
                     {vehicleLabel ? ' ・' : ''}
-                    距離：約 {distKm} 公里
+                    距離：約 {distKm.toFixed(1)} 公里
                   </span>
                 )}
-                {typeof estimatedFare === 'number' && (
-                  <span>{' ・'}預估價格：約 NT$ {estimatedFare}</span>
+                {typeof price === 'number' && (
+                  <span>
+                    {' ・'}預估價：約 $ {price.toFixed(2)}
+                  </span>
                 )}
-                {isDriverView && dispatchScore != null && (
+                {dispatchScore != null && (
                   <span>{' ・'}派遣分數：{dispatchScore} / 10</span>
                 )}
               </div>
@@ -174,3 +134,4 @@ export default function OrderList({
     </ul>
   )
 }
+

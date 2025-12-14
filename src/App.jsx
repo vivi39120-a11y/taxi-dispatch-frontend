@@ -43,6 +43,10 @@ export default function App() {
   const [error, setError] = useState('')
   const [simulateVehicles, setSimulateVehicles] = useState(true)
 
+  // ✅ 每位司機各自的 hotspot 起點
+  // { [driverId]: {lat, lng} }
+  const [driverHotspotPosById, setDriverHotspotPosById] = useState({})
+
   // ===== 從 API 抓資料 =====
   const fetchAll = async () => {
     try {
@@ -67,6 +71,7 @@ export default function App() {
     fetchAll()
     const timer = setInterval(fetchAll, 3000)
     return () => clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ===== 訂單 + 座標 =====
@@ -74,22 +79,16 @@ export default function App() {
     () =>
       orders.map(o => {
         const pickupLocation =
-          typeof o.pickupLat === 'number' &&
-          typeof o.pickupLng === 'number'
+          typeof o.pickupLat === 'number' && typeof o.pickupLng === 'number'
             ? { lat: o.pickupLat, lng: o.pickupLng }
             : resolveLocation(o.pickup)
 
         const dropoffLocation =
-          typeof o.dropoffLat === 'number' &&
-          typeof o.dropoffLng === 'number'
+          typeof o.dropoffLat === 'number' && typeof o.dropoffLng === 'number'
             ? { lat: o.dropoffLat, lng: o.dropoffLng }
             : resolveLocation(o.dropoff)
 
-        return {
-          ...o,
-          pickupLocation,
-          dropoffLocation,
-        }
+        return { ...o, pickupLocation, dropoffLocation }
       }),
     [orders]
   )
@@ -103,13 +102,27 @@ export default function App() {
   // 目前登入乘客自己的訂單 + 座標
   const passengerOrdersWithLoc = useMemo(() => {
     if (!currentUser || currentUser.role !== 'passenger') return []
-    return ordersWithLocations.filter(
-      o => o.customer === currentUser.username
-    )
+    return ordersWithLocations.filter(o => o.customer === currentUser.username)
   }, [ordersWithLocations, currentUser])
 
   // 司機端直接用全部訂單＋座標
   const driverOrdersWithLoc = ordersWithLocations
+
+  // 乘客端地圖要顯示哪些司機：
+  const riderVisibleDrivers = useMemo(() => {
+    if (!currentUser || currentUser.role !== 'passenger') return []
+
+    const assigned = orders.find(
+      o =>
+        o.customer === currentUser.username &&
+        o.status === 'assigned' &&
+        o.driverId
+    )
+    if (!assigned) return []
+
+    const d = drivers.find(dr => dr.id === assigned.driverId)
+    return d ? [d] : []
+  }, [orders, drivers, currentUser])
 
   // ===== 乘客下單 =====
   const createOrder = async (
@@ -144,8 +157,8 @@ export default function App() {
           dropoffLng: dropoffLoc?.lng ?? null,
           vehicleType: fareInfo?.vehicleType || null,
           distanceKm: fareInfo?.distanceKm ?? null,
-          estimatedFare: fareInfo?.price ?? null,
-          estimatedPrice: fareInfo?.price ?? null,
+          estimatedFare: fareInfo?.price ?? null,   // USD
+          estimatedPrice: fareInfo?.price ?? null,  // USD
           stops: safeStops,
         }),
       })
@@ -163,14 +176,14 @@ export default function App() {
     }
   }
 
-  // ===== 司機接單 =====
+  // ===== 司機接單（指派司機給訂單）=====
   const acceptOrder = async orderId => {
     if (!currentUser || currentUser.role !== 'driver') {
       alert(t(lang, 'needLoginDriver'))
       return
     }
     if (!currentDriverId) {
-      alert(t(lang, 'driverVehicleNotAttached'))
+      alert(t(lang, 'needBindDriverVehicle'))
       return
     }
 
@@ -192,13 +205,10 @@ export default function App() {
         throw new Error(data.error || `HTTP ${res.status}`)
       }
       const updatedOrder = await res.json()
-      setOrders(prev =>
-        prev.map(o => (o.id === updatedOrder.id ? updatedOrder : o))
-      )
+
+      setOrders(prev => prev.map(o => (o.id === updatedOrder.id ? updatedOrder : o)))
       setDrivers(prev =>
-        prev.map(d =>
-          d.id === updatedOrder.driverId ? { ...d, status: 'busy' } : d
-        )
+        prev.map(d => (d.id === updatedOrder.driverId ? { ...d, status: 'busy' } : d))
       )
     } catch (err) {
       console.error(err)
@@ -223,95 +233,37 @@ export default function App() {
       })
       if (!res.ok) throw new Error('driver-login failed')
       const driver = await res.json()
+
       setCurrentDriverId(driver.id)
       setDrivers(prev => {
         const exists = prev.some(d => d.id === driver.id)
         return exists ? prev : [...prev, driver]
       })
+
+      // ✅ 記錄這位司機的 hotspot 起點（各自一份）
+      if (typeof driver.lat === 'number' && typeof driver.lng === 'number') {
+        setDriverHotspotPosById(prev => ({
+          ...prev,
+          [driver.id]: { lat: driver.lat, lng: driver.lng },
+        }))
+      }
     } catch (err) {
       console.error(err)
       setError(t(lang, 'attachDriverFailed'))
     }
   }
 
-  // ===== 司機端：只移動「自己那台車」 =====
-  useEffect(() => {
-    if (!simulateVehicles) return
-    if (!currentUser || currentUser.role !== 'driver') return
-    if (!currentDriverId) return
+  // 司機在地圖點擊後，前端同步更新那台車的位置，並記住給熱點頁用（各自一份）
+  const handleDriverLocationChange = ({ id, lat, lng }) => {
+    setDrivers(prev => prev.map(d => (d.id === id ? { ...d, lat, lng } : d)))
 
-    const SPEED = 0.01
-    const EPSILON = 0.002
-
-    const timer = setInterval(() => {
-      setDrivers(prevDrivers => {
-        const idx = prevDrivers.findIndex(d => d.id === currentDriverId)
-        if (idx === -1) return prevDrivers
-
-        const myDriver = prevDrivers[idx]
-
-        const myOrder = driverOrdersWithLoc.find(
-          o => o.status === 'assigned' && o.driverId === currentDriverId
-        )
-        if (!myOrder) return prevDrivers
-
-        const { pickupLocation, dropoffLocation } = myOrder
-        if (!pickupLocation && !dropoffLocation) return prevDrivers
-
-        let lat = myDriver.lat
-        let lng = myDriver.lng
-        let targetLat
-        let targetLng
-
-        if (pickupLocation && dropoffLocation) {
-          const distToPickup = Math.hypot(
-            pickupLocation.lat - lat,
-            pickupLocation.lng - lng
-          )
-
-          if (distToPickup > EPSILON) {
-            targetLat = pickupLocation.lat
-            targetLng = pickupLocation.lng
-          } else {
-            targetLat = dropoffLocation.lat
-            targetLng = dropoffLocation.lng
-          }
-        } else if (pickupLocation) {
-          targetLat = pickupLocation.lat
-          targetLng = pickupLocation.lng
-        } else {
-          targetLat = dropoffLocation.lat
-          targetLng = dropoffLocation.lng
-        }
-
-        const dx = targetLat - lat
-        const dy = targetLng - lng
-        const dist = Math.hypot(dx, dy)
-
-        if (dist > 0) {
-          const step = Math.min(SPEED, dist)
-          lat += (dx / dist) * step
-          lng += (dy / dist) * step
-        }
-
-        const newDrivers = [...prevDrivers]
-        newDrivers[idx] = { ...myDriver, lat, lng }
-
-        fetch(`/api/drivers/${currentDriverId}/location`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ lat, lng }),
-        }).catch(() => {})
-
-        return newDrivers
-      })
-    }, 1000)
-
-    return () => clearInterval(timer)
-  }, [simulateVehicles, currentUser, currentDriverId, driverOrdersWithLoc])
+    setDriverHotspotPosById(prev => ({
+      ...prev,
+      [id]: { lat, lng },
+    }))
+  }
 
   // ===== Auth：註冊 / 登入（呼叫後端）=====
-
   const registerUser = async ({ username, password, role, carType }) => {
     try {
       const res = await fetch('/api/register', {
@@ -328,7 +280,6 @@ export default function App() {
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
-        // 後端 errorCode -> 對應多語系 key
         let key = null
         switch (data.errorCode) {
           case 'USERNAME_TAKEN':
@@ -340,10 +291,7 @@ export default function App() {
           default:
             key = 'registerFailed'
         }
-        return {
-          ok: false,
-          message: t(lang, key),
-        }
+        return { ok: false, message: t(lang, key) }
       }
 
       const user = data
@@ -376,7 +324,6 @@ export default function App() {
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
-        // 注意：後端是 NO_SUCH_ACCOUNT，不是 USER_NOT_FOUND
         let key = null
         switch (data.errorCode) {
           case 'MISSING_FIELDS':
@@ -391,10 +338,7 @@ export default function App() {
           default:
             key = 'loginFailed'
         }
-        return {
-          ok: false,
-          message: t(lang, key),
-        }
+        return { ok: false, message: t(lang, key) }
       }
 
       const user = data
@@ -419,7 +363,6 @@ export default function App() {
   // ===== 共用 props =====
   const baseProps = {
     lang,
-    drivers,
     loading,
     error,
     currentDriverId,
@@ -428,6 +371,7 @@ export default function App() {
     acceptOrder,
     refresh: fetchAll,
     currentUser,
+    simulateVehicles,
   }
 
   // ===== 首頁 / Auth =====
@@ -448,14 +392,6 @@ export default function App() {
           setShowAuth(true)
           setShowLanding(false)
         }}
-      />
-    )
-  }
-
-  if (showHeatmap) {
-    return (
-      <DriverPage 
-        onBack={() => setShowHeatmap(false)} 
       />
     )
   }
@@ -504,9 +440,7 @@ export default function App() {
               className="sim-toggle-btn"
               onClick={() => setSimulateVehicles(v => !v)}
             >
-              {simulateVehicles
-                ? t(lang, 'stopVehicleSim')
-                : t(lang, 'startVehicleSim')}
+              {simulateVehicles ? t(lang, 'stopVehicleSim') : t(lang, 'startVehicleSim')}
             </button>
           </div>
         </header>
@@ -526,9 +460,12 @@ export default function App() {
     )
   }
 
-  // ===== 主畫面 =====
+  // ✅ 這裡開始：主畫面永遠渲染，不會被 showHeatmap 取代（避免路徑消失）
+  const heatmapPosition =
+    (currentDriverId && driverHotspotPosById[currentDriverId]) || null
+
   return (
-    <div className="app-root">
+    <div className="app-root" style={{ position: 'relative' }}>
       <header className="app-header">
         <div className="app-title">{t(lang, 'appTitle')}</div>
 
@@ -579,9 +516,7 @@ export default function App() {
             onClick={() => setSimulateVehicles(v => !v)}
             style={{ marginLeft: 8 }}
           >
-            {simulateVehicles
-              ? t(lang, 'stopVehicleSim')
-              : t(lang, 'startVehicleSim')}
+            {simulateVehicles ? t(lang, 'stopVehicleSim') : t(lang, 'startVehicleSim')}
           </button>
         </div>
       </header>
@@ -590,17 +525,38 @@ export default function App() {
         {mode === 'rider' ? (
           <RiderView
             {...baseProps}
+            drivers={riderVisibleDrivers}
             orders={passengerOrders}
             ordersWithLocations={passengerOrdersWithLoc}
           />
         ) : (
           <DriverView
             {...baseProps}
+            drivers={drivers}
             orders={orders}
             ordersWithLocations={driverOrdersWithLoc}
+            onDriverLocationChange={handleDriverLocationChange}
           />
         )}
       </main>
+
+      {/* ✅ 熱點頁改成 overlay：不會卸載主畫面，自然不會讓路徑消失 */}
+      {showHeatmap && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 9999,
+            background: '#000000',
+          }}
+        >
+          <DriverPage
+            onBack={() => setShowHeatmap(false)}
+            driverId={currentDriverId}
+            driverPosition={heatmapPosition}
+          />
+        </div>
+      )}
     </div>
   )
 }

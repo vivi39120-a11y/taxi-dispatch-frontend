@@ -37,7 +37,6 @@ let drivers = []
 //   estimatedFare,
 //   stops: [       // ⭐ 中途停靠點
 //     { label, lat, lng },
-//     ...
 //   ],
 //   createdAt
 // }
@@ -45,7 +44,7 @@ let orders = []
 let nextDriverId = 1
 let nextOrderId = 1
 
-// 幾個分散在曼哈頓附近的起始點
+// 幾個分散在曼哈頓附近的起始點（現在暫時不用，但保留示意）
 const DRIVER_START_POSITIONS = [
   { lat: 40.7580, lng: -73.9855 }, // Times Square
   { lat: 40.7308, lng: -73.9973 }, // Washington Square Park
@@ -56,7 +55,7 @@ const DRIVER_START_POSITIONS = [
 ]
 let nextStartIndex = 0
 
-// 🔹 當外部 geocode 掛掉時，用的固定 demo 地點（和你本機常用的點一致）
+// 🔹 Geocode 掛掉時用的固定 demo 地點
 const FALLBACK_GEOCODE_PLACES = [
   {
     label: 'Times Square, Manhattan, New York, NY, USA',
@@ -137,7 +136,6 @@ app.post('/api/register', (req, res) => {
   users.push(user)
   console.log('New user registered:', user)
 
-  // 回傳時不要把密碼給前端
   const { password: _, ...safeUser } = user
   return res.json(safeUser)
 })
@@ -171,14 +169,10 @@ app.post('/api/login', (req, res) => {
 })
 
 // =================== Geocode API ===================
-// 線上希望「盡量跟本機一樣」：
-// 1. 先真的打 Nominatim（和本機邏輯一樣）。
-// 2. 如果 Render 那邊被擋掉 / 失敗，就回固定的 demo 地點（至少下拉不會空）。
 app.get('/api/geocode', async (req, res) => {
   const q = req.query.q
   const query = (q || '').trim()
 
-  // 沒輸入就不查，直接回空陣列（和本機 UX 一樣）
   if (!query) {
     return res.json([])
   }
@@ -190,7 +184,6 @@ app.get('/api/geocode', async (req, res) => {
 
     const response = await fetch(url, {
       headers: {
-        // 一定要帶 User-Agent，不然 Nominatim 會直接擋
         'User-Agent': 'taxi-dispatch-demo/1.0 (vivi39120@gmail.com)',
       },
     })
@@ -201,7 +194,6 @@ app.get('/api/geocode', async (req, res) => {
 
     const data = await response.json()
 
-    // 正常情況：跟本機一樣，回真實 geocode 結果
     const results = data.map(item => ({
       label: item.display_name,
       lat: parseFloat(item.lat),
@@ -211,14 +203,13 @@ app.get('/api/geocode', async (req, res) => {
     return res.json(results)
   } catch (err) {
     console.error('Geocode failed, using fallback demo places:', err)
-
-    // 緊急備援：外部 geocode 掛掉時，回幾個示範地點，避免完全沒有下拉
     return res.json(FALLBACK_GEOCODE_PLACES)
   }
 })
 
 // =================== 司機登入 / 位置 ===================
 
+// ⭐ 不再給隨機起點：首次登入 lat / lng = null，請司機手動定位
 app.post('/api/driver-login', (req, res) => {
   const { name, carType } = req.body
   if (!name) return res.status(400).json({ error: 'name is required' })
@@ -227,19 +218,17 @@ app.post('/api/driver-login', (req, res) => {
 
   let driver = drivers.find(d => d.name === name)
   if (!driver) {
-    const pos = getNextStartPosition()
     driver = {
       id: nextDriverId++,
       name,
-      lat: pos.lat,
-      lng: pos.lng,
+      lat: null,
+      lng: null,
       status: 'idle',
       carType: carTypeUpper,
     }
     drivers.push(driver)
-    console.log('New driver registered:', driver)
+    console.log('New driver registered (no initial position):', driver)
   } else {
-    // 如果後來更新了 carType，補上去
     if (carTypeUpper && !driver.carType) {
       driver.carType = carTypeUpper
     }
@@ -268,7 +257,6 @@ app.patch('/api/drivers/:id/location', (req, res) => {
 
 // =================== 訂單 API ===================
 
-// 建立訂單（含中途停靠點）
 app.post('/api/orders', (req, res) => {
   const {
     pickup,
@@ -280,16 +268,15 @@ app.post('/api/orders', (req, res) => {
     dropoffLng,
     distanceKm,
     vehicleType,
-    estimatedFare,   // 可能從舊版前端來
-    estimatedPrice,  // 新版前端用的名稱
-    stops,           // ⭐ 中途停靠點
+    estimatedFare,
+    estimatedPrice,
+    stops,
   } = req.body
 
   if (!pickup || !dropoff) {
     return res.status(400).json({ error: 'pickup & dropoff are required' })
   }
 
-  // ⭐ 正規化中途停靠點： [{ label, lat, lng }, ...]
   const normalizedStops = Array.isArray(stops)
     ? stops.map(s => {
         const label =
@@ -317,7 +304,6 @@ app.post('/api/orders', (req, res) => {
       })
     : []
 
-  // 估價欄位：兩個名字擇一
   const finalPrice =
     typeof estimatedPrice === 'number'
       ? estimatedPrice

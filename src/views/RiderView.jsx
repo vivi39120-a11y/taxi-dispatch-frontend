@@ -1,5 +1,5 @@
 // src/views/RiderView.jsx
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import MapView from '../components/MapView.jsx'
 import OrderList from '../components/OrderList.jsx'
 import { t } from '../i18n'
@@ -7,13 +7,14 @@ import { t } from '../i18n'
 export default function RiderView({
   lang,
   drivers,
-  orders,               // 目前乘客自己的訂單（App.jsx 已經有過濾）
-  ordersWithLocations,  // 有座標的版本，拿來畫地圖
+  orders, // 目前乘客自己的訂單（App.jsx 已經過濾）
+  ordersWithLocations, // 有座標的版本（同樣是乘客自己的）
   loading,
   error,
-  createOrder,          // (pickup, dropoff, pickupLoc, dropoffLoc, fareInfo, stops)
+  createOrder,
   refresh,
   currentUser,
+  simulateVehicles,
 }) {
   // 文字輸入
   const [pickupText, setPickupText] = useState('')
@@ -29,7 +30,7 @@ export default function RiderView({
   const [pickupLocked, setPickupLocked] = useState(false)
   const [dropoffLocked, setDropoffLocked] = useState(false)
 
-  // ⭐ 中途停靠點：[{ text, loc, suggestions, locked }]
+  // 中途停靠點
   const [stops, setStops] = useState([])
 
   // 預估價格結果
@@ -38,6 +39,44 @@ export default function RiderView({
   const [lastDistanceKm, setLastDistanceKm] = useState(null)
   const [selectedVehicle, setSelectedVehicle] = useState(null)
   const [resolvedStops, setResolvedStops] = useState([])
+
+  // ====== 1) 乘客地圖要畫哪一張單：只挑「自己」且「進行中」的最新 1 張 ======
+  const myActiveOrder = useMemo(() => {
+    if (!currentUser || currentUser.role !== 'passenger') return null
+
+    const ACTIVE = new Set([
+      'assigned',
+      'accepted',
+      'en_route',
+      'enroute',
+      'picked_up',
+      'in_progress',
+      'on_trip',
+      'ongoing',
+    ])
+
+    const candidates = ordersWithLocations
+      .filter(o => o && o.customer === currentUser.username)
+      .filter(o => ACTIVE.has(String(o.status || '').toLowerCase()))
+
+    if (!candidates.length) return null
+
+    const getTs = o => {
+      const u = o.updatedAt ? Date.parse(o.updatedAt) : NaN
+      if (Number.isFinite(u)) return u
+      const c = o.createdAt ? Date.parse(o.createdAt) : NaN
+      if (Number.isFinite(c)) return c
+      return typeof o.id === 'number' ? o.id : 0
+    }
+
+    candidates.sort((a, b) => getTs(b) - getTs(a))
+    return candidates[0]
+  }, [ordersWithLocations, currentUser])
+
+  // ✅ MapView 一律只吃 0 或 1 張單（避免第二筆被第一筆覆蓋或抓錯）
+  const ordersForMap = useMemo(() => {
+    return myActiveOrder ? [myActiveOrder] : []
+  }, [myActiveOrder])
 
   // ===== 小工具：呼叫一次 geocode，拿第一筆結果 =====
   async function geocodeOnce(text) {
@@ -50,10 +89,10 @@ export default function RiderView({
     return { lat: first.lat, lng: first.lng }
   }
 
-  // ===== 小工具：算兩點距離（km，haversine）=====
+  // 備援用的直線距離（km，haversine）
   function distanceKm(a, b) {
     const toRad = d => (d * Math.PI) / 180
-    const R = 6371 // km
+    const R = 6371
     const dLat = toRad(b.lat - a.lat)
     const dLng = toRad(b.lng - a.lng)
     const la1 = toRad(a.lat)
@@ -68,13 +107,34 @@ export default function RiderView({
     return R * c
   }
 
+  // 用 OSRM 算「多點路線」的道路距離 (km)
+  async function osrmRouteDistanceKm(points) {
+    if (!Array.isArray(points) || points.length < 2) return null
+
+    const coordStr = points.map(p => `${p.lng},${p.lat}`).join(';')
+
+    const url =
+      `https://router.project-osrm.org/route/v1/driving/` +
+      coordStr +
+      `?overview=false`
+
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('OSRM error')
+
+    const data = await res.json()
+    if (!data.routes || !data.routes.length) {
+      throw new Error('OSRM no route')
+    }
+
+    return data.routes[0].distance / 1000
+  }
+
   // ===== 上車地點：打字 → geocode 建議 =====
   useEffect(() => {
     if (pickupLocked) {
       setPickupSuggestions([])
       return
     }
-
     if (!pickupText || pickupText.length < 2) {
       setPickupSuggestions([])
       return
@@ -107,7 +167,6 @@ export default function RiderView({
       setDropoffSuggestions([])
       return
     }
-
     if (!dropoffText || dropoffText.length < 2) {
       setDropoffSuggestions([])
       return
@@ -152,10 +211,7 @@ export default function RiderView({
 
   // ===== 中途停靠點：新增 / 移除 / 修改 =====
   const addStop = () => {
-    setStops(prev => [
-      ...prev,
-      { text: '', loc: null, suggestions: [], locked: false },
-    ])
+    setStops(prev => [...prev, { text: '', loc: null, suggestions: [], locked: false }])
     resetFarePanel()
   }
 
@@ -164,18 +220,11 @@ export default function RiderView({
     resetFarePanel()
   }
 
-  // 打字時，同步更新文字，並即時去後端抓建議
   const updateStopText = (index, text) => {
     setStops(prev => {
       const copy = [...prev]
       if (!copy[index]) return prev
-      copy[index] = {
-        ...copy[index],
-        text,
-        loc: null,
-        locked: false,
-        suggestions: [],
-      }
+      copy[index] = { ...copy[index], text, loc: null, locked: false, suggestions: [] }
       return copy
     })
     resetFarePanel()
@@ -183,24 +232,17 @@ export default function RiderView({
     const trimmed = text.trim()
     if (trimmed.length < 2) return
 
-    // 立刻打 API（不另外做 debounce，簡化實作）
     ;(async () => {
       try {
-        const res = await fetch(
-          `/api/geocode?q=${encodeURIComponent(trimmed)}`
-        )
+        const res = await fetch(`/api/geocode?q=${encodeURIComponent(trimmed)}`)
         if (!res.ok) return
         const data = await res.json()
         setStops(prev => {
           const copy = [...prev]
           if (!copy[index]) return prev
-          // 如果期間使用者已經改文字 / 鎖定，就不要覆蓋
           if (copy[index].locked) return prev
           if (copy[index].text !== text) return prev
-          copy[index] = {
-            ...copy[index],
-            suggestions: Array.isArray(data) ? data : [],
-          }
+          copy[index] = { ...copy[index], suggestions: Array.isArray(data) ? data : [] }
           return copy
         })
       } catch {
@@ -209,7 +251,6 @@ export default function RiderView({
     })()
   }
 
-  // 選取停靠點建議：填入文字 + 存 loc + ✨ 收起下拉選單
   const handleSelectStopSuggestion = (index, item) => {
     setStops(prev => {
       const copy = [...prev]
@@ -265,29 +306,24 @@ export default function RiderView({
         return
       }
 
-      // 停靠點
+      // 停靠點解析
       const resolved = []
       for (const s of stops) {
         const label = (s.text || '').trim()
         if (!label) continue
 
         let loc = s.loc
-        if (!loc) {
-          loc = await geocodeOnce(label)
-        }
+        if (!loc) loc = await geocodeOnce(label)
+
         if (!loc) {
           setFareError(t(lang, 'cannotFindStop'))
           return
         }
-        resolved.push({
-          label,
-          lat: loc.lat,
-          lng: loc.lng,
-        })
+        resolved.push({ label, lat: loc.lat, lng: loc.lng })
       }
-
       setResolvedStops(resolved)
 
+      // OSRM 多點路徑：起點 → 停靠點 → 終點
       const points = [
         { lat: pLoc.lat, lng: pLoc.lng },
         ...resolved.map(s => ({ lat: s.lat, lng: s.lng })),
@@ -295,8 +331,14 @@ export default function RiderView({
       ]
 
       let totalDist = 0
-      for (let i = 0; i < points.length - 1; i++) {
-        totalDist += distanceKm(points[i], points[i + 1])
+      try {
+        const dKm = await osrmRouteDistanceKm(points)
+        totalDist = dKm
+      } catch (e) {
+        console.warn('OSRM failed, fallback to haversine', e)
+        for (let i = 0; i < points.length - 1; i++) {
+          totalDist += distanceKm(points[i], points[i + 1])
+        }
       }
 
       const distRounded = Math.round(totalDist * 10) / 10
@@ -307,21 +349,19 @@ export default function RiderView({
         return
       }
 
-      const baseYellow = 70
-      const perKmYellow = 25
-      const baseGreen = 60
-      const perKmGreen = 22
-      const baseFhv = 90
-      const perKmFhv = 30
+      // USD 價格：示意公式
+      const baseFare = 2.5
+      const perKm = 1.5
+      const rawFare = baseFare + perKm * totalDist
 
-      const estYellow = Math.round(baseYellow + perKmYellow * totalDist)
-      const estGreen = Math.round(baseGreen + perKmGreen * totalDist)
-      const estFhv = Math.round(baseFhv + perKmFhv * totalDist)
+      const estYellow = +(rawFare * 1.0).toFixed(2)
+      const estGreen = +(rawFare * 0.9).toFixed(2)
+      const estFhv = +(rawFare * 1.3).toFixed(2)
 
       setFareOptions([
         { type: 'YELLOW', label: t(lang, 'carTypeYellow'), price: estYellow },
-        { type: 'GREEN',  label: t(lang, 'carTypeGreen'),  price: estGreen },
-        { type: 'FHV',    label: t(lang, 'carTypeFhv'),    price: estFhv },
+        { type: 'GREEN', label: t(lang, 'carTypeGreen'), price: estGreen },
+        { type: 'FHV', label: t(lang, 'carTypeFhv'), price: estFhv },
       ])
     } catch (e) {
       console.error(e)
@@ -376,23 +416,20 @@ export default function RiderView({
 
   return (
     <section className="map-section">
-      {/* 左邊地圖 */}
       <div className="map-wrapper">
         <MapView
           lang={lang}
           drivers={drivers}
-          orders={ordersWithLocations}
+          orders={ordersForMap}
           mode="passenger"
           currentDriverId={null}
+          simulateVehicles={simulateVehicles}
         />
       </div>
 
-      {/* 右邊操作面板 */}
       <aside className="side-panel">
         <div className="panel-inner">
-          <h1 className="panel-title">
-            {t(lang, 'passengerMode')}
-          </h1>
+          <h1 className="panel-title">{t(lang, 'passengerMode')}</h1>
 
           <div className="field-label">{t(lang, 'currentPassengerLabel')}</div>
           <div className="current-driver-box">
@@ -454,9 +491,7 @@ export default function RiderView({
                         key={sIdx}
                         type="button"
                         className="autocomplete-item"
-                        onClick={() =>
-                          handleSelectStopSuggestion(index, item)
-                        }
+                        onClick={() => handleSelectStopSuggestion(index, item)}
                       >
                         {item.label}
                       </button>
@@ -557,9 +592,7 @@ export default function RiderView({
                       disabled={loading}
                     >
                       <span>{opt.label}</span>
-                      <span className="fare-price">
-                        約 NT$ {opt.price}
-                      </span>
+                      <span className="fare-price">≈ ${opt.price.toFixed(2)}</span>
                     </button>
                   </li>
                 ))}
