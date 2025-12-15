@@ -1,407 +1,609 @@
 // src/components/MapView.jsx
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  Polyline,
-  useMapEvents,
-} from 'react-leaflet'
-import { useMemo, useEffect, useState } from 'react'
-import {
-  taxiIcon,
-  passengerIcon,
-  dropoffIcon,
-  createStopIcon,
-} from '../mapIcons'
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMapEvents } from 'react-leaflet'
+import { useMemo, useEffect, useRef, useState } from 'react'
+import { taxiIcon, passengerIcon, dropoffIcon, createStopIcon } from '../mapIcons'
 import { t } from '../i18n'
 
 const DEFAULT_CENTER = [40.758, -73.9855] // Times Square
+const STEP_MS = 120 // 兩端同步用的步進時間
+const ORDER_START_PREFIX = 'orderStart:' // 每筆訂單固定的司機起點（只寫一次）
 
-// 司機在地圖上點一下就更新自己的位置
+const ACTIVE_STATUS_SET = new Set([
+  'assigned',
+  'accepted',
+  'en_route',
+  'enroute',
+  'picked_up',
+  'in_progress',
+  'on_trip',
+  'ongoing',
+])
+
+function sameId(a, b) {
+  const A = Number(a)
+  const B = Number(b)
+  return Number.isFinite(A) && Number.isFinite(B) && A === B
+}
+
+function isActiveStatus(status) {
+  const s = String(status || '').toLowerCase()
+  return ACTIVE_STATUS_SET.has(s)
+}
+
+// ====== orderStart: 固定每張訂單的司機起點（避免中途跳回重跑）=====
+function readOrderStart(orderId) {
+  try {
+    const raw = localStorage.getItem(`${ORDER_START_PREFIX}${orderId}`)
+    if (!raw) return null
+    const obj = JSON.parse(raw)
+    const lat = Number(obj?.lat)
+    const lng = Number(obj?.lng)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+    return { lat, lng }
+  } catch {
+    return null
+  }
+}
+
+function writeOrderStartOnce(orderId, latlng) {
+  if (orderId == null || !latlng) return
+  try {
+    const k = `${ORDER_START_PREFIX}${orderId}`
+    if (localStorage.getItem(k)) return // ✅ 只寫一次
+    localStorage.setItem(k, JSON.stringify({ lat: latlng.lat, lng: latlng.lng }))
+  } catch {}
+}
+
+function clearOrderStart(orderId) {
+  try {
+    localStorage.removeItem(`${ORDER_START_PREFIX}${orderId}`)
+  } catch {}
+}
+
+function readDriverLocFromLocal(driverId) {
+  try {
+    const raw = localStorage.getItem(`driverLoc:${driverId}`)
+    if (!raw) return null
+    const obj = JSON.parse(raw)
+    const lat = Number(obj?.lat)
+    const lng = Number(obj?.lng)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+    return { lat, lng }
+  } catch {
+    return null
+  }
+}
+
+// ====== Driver click to set location ======
 function DriverClickHandler({ enabled, driverId, onLocationChange }) {
   useMapEvents({
     click(e) {
       if (!enabled || !driverId || !onLocationChange) return
-
       const { lat, lng } = e.latlng
 
-      // 1) 更新 React state（司機位置）
       onLocationChange({ id: driverId, lat, lng })
 
-      // 2) PATCH API 更新後端
       fetch(`/api/drivers/${driverId}/location`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lat, lng }),
       }).catch(() => {})
 
-      // 3) 額外：存成「熱點需求要用的基準位置」
       try {
-        localStorage.setItem(
-          'hotspotBase',
-          JSON.stringify({ lat, lng, driverId })
-        )
-      } catch (err) {
-        console.error('save hotspotBase failed', err)
-      }
+        localStorage.setItem(`driverLoc:${driverId}`, JSON.stringify({ lat, lng }))
+      } catch {}
     },
   })
   return null
 }
 
-// OSRM 小工具：給一串座標，回傳沿道路的路徑 [ [lat,lng], ... ]
-async function fetchOsrmRoute(points) {
+async function fetchOsrmRoute(points, { signal } = {}) {
   if (!Array.isArray(points) || points.length < 2) return null
-
   const coordStr = points.map(p => `${p.lng},${p.lat}`).join(';')
+  const url = `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson`
 
-  const url =
-    `https://router.project-osrm.org/route/v1/driving/${coordStr}` +
-    `?overview=full&geometries=geojson`
-
-  const res = await fetch(url)
+  const res = await fetch(url, { signal })
   if (!res.ok) throw new Error('OSRM error')
-
   const data = await res.json()
-  if (!data.routes || !data.routes[0] || !data.routes[0].geometry) {
-    throw new Error('OSRM no route')
-  }
-
-  const coords = data.routes[0].geometry.coordinates
-  // OSRM: [lng, lat] -> Leaflet 需要 [lat, lng]
+  const coords = data?.routes?.[0]?.geometry?.coordinates
+  if (!coords || coords.length < 2) throw new Error('OSRM no route')
   return coords.map(([lng, lat]) => [lat, lng])
 }
 
-// 建出「這張單要給 OSRM 的 waypoints」
-// 乘客端：若有司機位置就從司機開始；否則從上車點開始
-// 司機端：只有「自己且已派單」的訂單才從司機開始
-function buildWaypoints(order, mode, drivers, currentDriverId) {
+function routeKey(points) {
+  if (!Array.isArray(points)) return ''
+  return points.map(p => `${Number(p.lat).toFixed(5)},${Number(p.lng).toFixed(5)}`).join('|')
+}
+
+// passenger polyline 切段用：找到最接近 pickup 的 index
+function nearestIndexToPoint(coords, target) {
+  if (!Array.isArray(coords) || !coords.length || !target) return 0
+  const tLat = Number(target.lat)
+  const tLng = Number(target.lng)
+  if (!Number.isFinite(tLat) || !Number.isFinite(tLng)) return 0
+
+  let bestIdx = 0
+  let bestD = Infinity
+  for (let i = 0; i < coords.length; i++) {
+    const [lat, lng] = coords[i]
+    const dLat = lat - tLat
+    const dLng = lng - tLng
+    const d = dLat * dLat + dLng * dLng
+    if (d < bestD) {
+      bestD = d
+      bestIdx = i
+    }
+  }
+  return bestIdx
+}
+
+// ✅ 訂單 waypoints：兩端用同一條「車行路線」
+// 核心：司機起點用 orderStart 固定，不跟著 driver.lat/lng polling 改變
+function buildCarWaypoints(order, mode, drivers, currentDriverId) {
   const pickup = order.pickupLocation
   const dropoff = order.dropoffLocation
   const stops = Array.isArray(order.stops) ? order.stops : []
-
   if (!pickup || !dropoff) return null
+
+  const active = isActiveStatus(order.status)
+  const driverId = order.driverId
+
+  const visibleToThisView =
+    mode === 'passenger' ||
+    (mode === 'driver' && driverId != null && currentDriverId != null && sameId(driverId, currentDriverId))
 
   const waypoints = []
 
-  const driverId = order.driverId
-  const assignedDriver =
-    driverId != null ? drivers.find(d => d.id === driverId) : null
+  // 司機起點：優先 orderStart（固定），沒有才用 drivers / localStorage driverLoc 並寫入一次
+  if (active && visibleToThisView && driverId != null) {
+    let fixedStart = readOrderStart(order.id)
 
-  const hasDriverPos =
-    assignedDriver &&
-    typeof assignedDriver.lat === 'number' &&
-    typeof assignedDriver.lng === 'number'
+    if (!fixedStart) {
+      const d = drivers.find(x => sameId(x.id, driverId))
+      const fromDrivers =
+        d && typeof d.lat === 'number' && typeof d.lng === 'number' ? { lat: d.lat, lng: d.lng } : null
 
-  let shouldIncludeDriver = false
-  if (mode === 'passenger' && hasDriverPos) {
-    shouldIncludeDriver = true
-  } else if (
-    mode === 'driver' &&
-    hasDriverPos &&
-    currentDriverId != null &&
-    driverId === currentDriverId
-  ) {
-    shouldIncludeDriver = true
+      const fromLocal = readDriverLocFromLocal(driverId)
+      const start = fromDrivers || fromLocal
+
+      if (start) {
+        writeOrderStartOnce(order.id, start)
+        fixedStart = start
+      }
+    }
+
+    if (fixedStart) {
+      waypoints.push(fixedStart)
+    }
   }
 
-  if (shouldIncludeDriver) {
-    waypoints.push({ lat: assignedDriver.lat, lng: assignedDriver.lng })
-  }
-
-  // 上車點
   waypoints.push({ lat: pickup.lat, lng: pickup.lng })
 
-  // 中途停靠點
   stops.forEach(s => {
     if (s && typeof s.lat === 'number' && typeof s.lng === 'number') {
       waypoints.push({ lat: s.lat, lng: s.lng })
     }
   })
 
-  // 終點
   waypoints.push({ lat: dropoff.lat, lng: dropoff.lng })
 
   return waypoints.length >= 2 ? waypoints : null
 }
 
+// ====== 模擬狀態：跨分頁同步（避免切頁重跑/兩端不同步）=====
+function simKey(orderId) {
+  return `sim:${orderId}`
+}
+
+function readSim(orderId) {
+  try {
+    const raw = localStorage.getItem(simKey(orderId))
+    if (!raw) return null
+    const obj = JSON.parse(raw)
+    if (!obj || typeof obj !== 'object') return null
+    return obj
+  } catch {
+    return null
+  }
+}
+
+function writeSim(orderId, obj) {
+  try {
+    localStorage.setItem(simKey(orderId), JSON.stringify(obj))
+  } catch {}
+}
+
+function ensureSim(orderId) {
+  const now = Date.now()
+  const cur = readSim(orderId)
+  if (cur) return cur
+  const init = {
+    elapsedMs: 0,
+    startedAt: now,
+    running: true,
+    stepMs: STEP_MS,
+    completed: false,
+  }
+  writeSim(orderId, init)
+  return init
+}
+
+function pauseSim(orderId) {
+  const now = Date.now()
+  const cur = readSim(orderId)
+  if (!cur || cur.completed) return
+  if (!cur.running) return
+  const elapsed = Number(cur.elapsedMs) || 0
+  const startedAt = Number(cur.startedAt) || now
+  const next = { ...cur, elapsedMs: elapsed + Math.max(0, now - startedAt), running: false, startedAt: now }
+  writeSim(orderId, next)
+}
+
+function resumeSim(orderId) {
+  const now = Date.now()
+  const cur = readSim(orderId)
+  if (!cur || cur.completed) return
+  if (cur.running) return
+  const next = { ...cur, running: true, startedAt: now }
+  writeSim(orderId, next)
+}
+
+function completeSim(orderId) {
+  const now = Date.now()
+  const cur = readSim(orderId) || {}
+  const next = { ...cur, running: false, completed: true, startedAt: now }
+  writeSim(orderId, next)
+}
+
+function computeIndex(orderId) {
+  const now = Date.now()
+  const cur = ensureSim(orderId)
+  const stepMs = Number(cur.stepMs) || STEP_MS
+  const elapsed = Number(cur.elapsedMs) || 0
+  const startedAt = Number(cur.startedAt) || now
+  const total = elapsed + (cur.running ? Math.max(0, now - startedAt) : 0)
+  const idx = Math.floor(total / stepMs)
+  return { idx, sim: cur }
+}
+
 export default function MapView({
   lang,
-  mode,               // 'passenger' | 'driver'
+  mode, // 'passenger' | 'driver'
   drivers = [],
-  orders = [],        // 已經在 View 端過濾好的訂單
+  orders = [],
   currentDriverId,
   onDriverLocationChange,
   simulateVehicles = true,
+
+  previewEnabled = false,
+  previewWaypoints = null,
+  previewMarkers = null,
+
+  completedOrderIds, // optional (Set)
+  onOrderArrived, // optional (orderId) => void
+  onOrderCompleted, // optional (orderId) => void
 }) {
   const isDriverMode = mode === 'driver'
 
-  // 目前這台司機車
   const myDriver = useMemo(
-    () =>
-      isDriverMode && currentDriverId != null
-        ? drivers.find(d => d.id === currentDriverId)
-        : null,
+    () => (isDriverMode && currentDriverId != null ? drivers.find(d => sameId(d.id, currentDriverId)) : null),
     [drivers, isDriverMode, currentDriverId]
   )
 
-  // 哪些司機正在執行訂單（避免畫出靜態 marker，和動畫車重疊）
-  const busyDriverIds = useMemo(
-    () =>
-      new Set(
-        orders
-          .filter(o => o.status === 'assigned' && o.driverId != null)
-          .map(o => o.driverId)
-      ),
-    [orders]
-  )
+  const osrmCacheRef = useRef(new Map())
+  const osrmAbortRef = useRef(null)
 
-  // OSRM 路徑 & 車輛動畫 state
-  const [routesByOrder, setRoutesByOrder] = useState({}) // { orderId: [[lat,lng], ...] }
-  const [movingCars, setMovingCars] = useState({})       // { orderId: { index, position } }
+  const [routesByOrder, setRoutesByOrder] = useState({})
+  const [previewRoute, setPreviewRoute] = useState(null)
 
-  // 每當訂單 / 司機列表變化，就重新向 OSRM 取得路徑
+  // ✅ tick 觸發 re-render（位置由 Date.now + localStorage 推導 → 兩端同步）
+  const [tick, setTick] = useState(0)
+
+  const arrivedOnceRef = useRef(new Set())
+
+  // 取得「訂單路線」
   useEffect(() => {
     let cancelled = false
+    const controller = new AbortController()
 
     async function loadRoutes() {
       const next = {}
+      const orderIds = new Set(orders.map(o => o?.id).filter(id => id != null))
 
-      for (const o of orders) {
-        const waypoints = buildWaypoints(o, mode, drivers, currentDriverId)
-        if (!waypoints) continue
+      const tasks = orders.map(async o => {
+        const wps = buildCarWaypoints(o, mode, drivers, currentDriverId)
+        if (!wps) return
 
-        try {
-          const coords = await fetchOsrmRoute(waypoints)
-          if (cancelled || !coords || coords.length < 2) continue
-          next[o.id] = coords
-        } catch (e) {
-          console.warn('OSRM route error for order', o.id, e)
+        const key = `order:${o.id}:${routeKey(wps)}`
+        if (osrmCacheRef.current.has(key)) {
+          next[o.id] = osrmCacheRef.current.get(key)
+          return
         }
-      }
+        try {
+          const coords = await fetchOsrmRoute(wps, { signal: controller.signal })
+          if (!coords || coords.length < 2) return
+          osrmCacheRef.current.set(key, coords)
+          next[o.id] = coords
+        } catch {
+          // ignore
+        }
+      })
 
-      if (!cancelled) {
-        setRoutesByOrder(next)
-      }
+      await Promise.all(tasks)
+
+      if (cancelled) return
+
+      // ✅ 不要因為這輪 OSRM 失敗就把舊路線整個清掉（避免閃爍）
+      setRoutesByOrder(prev => {
+        const merged = { ...prev, ...next }
+        // ✅ 清掉已不存在的訂單路線
+        Object.keys(merged).forEach(k => {
+          const idNum = Number(k)
+          const id = Number.isFinite(idNum) ? idNum : k
+          if (!orderIds.has(id)) delete merged[k]
+        })
+        return merged
+      })
     }
 
     loadRoutes()
+
     return () => {
       cancelled = true
+      controller.abort()
     }
   }, [orders, drivers, mode, currentDriverId])
 
-  // 當有新的路徑出現時，如果這張單還沒有 car 狀態，就從路徑起點開始
+  // simulateVehicles 切換：更新 sim 狀態（跨分頁一致）
   useEffect(() => {
-    setMovingCars(prev => {
-      const next = { ...prev }
-      Object.entries(routesByOrder).forEach(([orderId, coords]) => {
-        if (!coords || coords.length === 0) return
-        if (!next[orderId]) {
-          next[orderId] = {
-            index: 0,
-            position: { lat: coords[0][0], lng: coords[0][1] },
-          }
-        }
-      })
-      return next
-    })
-  }, [routesByOrder])
+    const ids = orders.map(o => o?.id).filter(id => id != null)
+    if (!ids.length) return
+    if (simulateVehicles) ids.forEach(id => resumeSim(id))
+    else ids.forEach(id => pauseSim(id))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [simulateVehicles, orders])
 
-  // 動畫：每 300ms 沿著路徑往下一個點移動（simulateVehicles=false 則停止）
+  // ticking：只有 simulateVehicles=true 才跑
   useEffect(() => {
     if (!simulateVehicles) return
-
-    const timer = setInterval(() => {
-      setMovingCars(prev => {
-        const next = { ...prev }
-
-        for (const [orderId, car] of Object.entries(prev)) {
-          const route = routesByOrder[orderId]
-          if (!route || route.length === 0) continue
-
-          const newIndex =
-            car.index < route.length - 1 ? car.index + 1 : route.length - 1
-          const [lat, lng] = route[newIndex]
-          next[orderId] = {
-            index: newIndex,
-            position: { lat, lng },
-          }
-        }
-
-        return next
-      })
-    }, 300)
-
+    const timer = setInterval(() => setTick(t => t + 1), STEP_MS)
     return () => clearInterval(timer)
-  }, [routesByOrder, simulateVehicles])
+  }, [simulateVehicles])
 
-  // 地圖中心：司機頁優先用司機位置，其次用第一筆訂單；乘客頁用第一筆訂單
+  // 預覽路線
+  useEffect(() => {
+    if (!previewEnabled || !Array.isArray(previewWaypoints) || previewWaypoints.length < 2) {
+      setPreviewRoute(null)
+      return
+    }
+
+    if (osrmAbortRef.current) osrmAbortRef.current.abort()
+    const controller = new AbortController()
+    osrmAbortRef.current = controller
+
+    const key = `preview:${routeKey(previewWaypoints)}`
+    ;(async () => {
+      try {
+        if (osrmCacheRef.current.has(key)) {
+          setPreviewRoute(osrmCacheRef.current.get(key))
+          return
+        }
+        const coords = await fetchOsrmRoute(previewWaypoints, { signal: controller.signal })
+        if (!coords || coords.length < 2) return
+        osrmCacheRef.current.set(key, coords)
+        setPreviewRoute(coords)
+      } catch {
+        // ignore
+      }
+    })()
+
+    return () => controller.abort()
+  }, [previewEnabled, previewWaypoints])
+
   const mapCenter = useMemo(() => {
-    if (
-      isDriverMode &&
-      myDriver &&
-      typeof myDriver.lat === 'number' &&
-      typeof myDriver.lng === 'number'
-    ) {
+    if (previewEnabled && previewMarkers?.pickup?.lat && previewMarkers?.pickup?.lng) {
+      return [previewMarkers.pickup.lat, previewMarkers.pickup.lng]
+    }
+
+    if (isDriverMode && myDriver && typeof myDriver.lat === 'number' && typeof myDriver.lng === 'number') {
       return [myDriver.lat, myDriver.lng]
     }
 
     const firstOrder = orders[0]
-    const loc =
-      firstOrder?.pickupLocation || firstOrder?.dropoffLocation || null
+    const loc = firstOrder?.pickupLocation || firstOrder?.dropoffLocation || null
     if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
       return [loc.lat, loc.lng]
     }
 
     return DEFAULT_CENTER
-  }, [isDriverMode, myDriver, orders])
+  }, [previewEnabled, previewMarkers, isDriverMode, myDriver, orders])
 
-  // 司機標記（靜態車子）：只在司機模式畫，而且若司機正在跑單則以動畫車取代
+  // 司機 marker：只有「沒有進行中路線」時才顯示（避免司機端看到兩台車）
+  const hasAnyActiveRouteForDriver = useMemo(() => {
+    if (!isDriverMode) return false
+    const o = orders?.[0]
+    if (!o) return false
+    const active = isActiveStatus(o.status)
+    return active && o.driverId != null && currentDriverId != null && sameId(o.driverId, currentDriverId)
+  }, [orders, isDriverMode, currentDriverId])
+
   const driverMarkers = useMemo(() => {
     if (!isDriverMode) return null
-
+    if (hasAnyActiveRouteForDriver) return null
     return drivers
-      .filter(
-        d =>
-          typeof d.lat === 'number' &&
-          typeof d.lng === 'number' &&
-          !busyDriverIds.has(d.id)
-      )
+      .filter(d => typeof d.lat === 'number' && typeof d.lng === 'number')
       .map(d => (
-        <Marker
-          key={`driver-${d.id}`}
-          position={[d.lat, d.lng]}
-          icon={taxiIcon}
-        >
+        <Marker key={`driver-${d.id}`} position={[d.lat, d.lng]} icon={taxiIcon}>
           <Popup>
             {t(lang, 'driverPrefix')}
             {d.name || d.id}
           </Popup>
         </Marker>
       ))
-  }, [drivers, lang, isDriverMode, busyDriverIds])
+  }, [drivers, lang, isDriverMode, hasAnyActiveRouteForDriver])
 
-  // 訂單標記 + 路線 + 動畫車
-  const orderGraphics = useMemo(
-    () =>
-      orders.map(o => {
-        const pickup = o.pickupLocation
-        const dropoff = o.dropoffLocation
-        const stops = Array.isArray(o.stops) ? o.stops : []
+  // 訂單圖層（polyline + 車）
+  const orderGraphics = useMemo(() => {
+    return orders.map(o => {
+      const pickup = o.pickupLocation
+      const dropoff = o.dropoffLocation
+      const stops = Array.isArray(o.stops) ? o.stops : []
+      const routeCoords = routesByOrder[o.id]
 
-        const routeCoords = routesByOrder[o.id]
+      const active = isActiveStatus(o.status)
 
-        const polyline =
-          routeCoords && routeCoords.length >= 2 ? (
-            <Polyline
-              key={`poly-${o.id}`}
-              positions={routeCoords}
-              pathOptions={{ color: '#2196f3', weight: 3 }}
-            />
-          ) : null
+      // 司機端只顯示自己的單
+      const visibleToThisView =
+        mode === 'passenger' ||
+        (mode === 'driver' && o.driverId != null && currentDriverId != null && sameId(o.driverId, currentDriverId))
 
-        const car = movingCars[o.id]
-        const shouldShowMovingCar =
-          car &&
-          (mode === 'passenger' ||
-            (mode === 'driver' &&
-              o.driverId != null &&
-              o.driverId === currentDriverId &&
-              o.status === 'assigned'))
+      
+     let polyPositions = routeCoords
 
-        const carMarker = shouldShowMovingCar ? (
-          <Marker
-            key={`car-${o.id}`}
-            position={[car.position.lat, car.position.lng]}
-            icon={taxiIcon}
-          >
-            <Popup>Order #{o.id}</Popup>
-          </Marker>
+      // ✅ 乘客端：只有 pending 才不畫「司機→上車點」；一旦接單(active)就畫完整路線
+      if (
+        mode === 'passenger' &&
+        !isActiveStatus(o.status) && // pending/未接單
+        routeCoords &&
+        pickup &&
+        typeof pickup.lat === 'number' &&
+        typeof pickup.lng === 'number'
+      ) {
+        const idx = nearestIndexToPoint(routeCoords, pickup)
+        polyPositions = routeCoords.slice(idx)
+      }
+
+      const polyline =
+        polyPositions && polyPositions.length >= 2 ? (
+          <Polyline key={`poly-${o.id}`} positions={polyPositions} pathOptions={{ weight: 3 }} />
         ) : null
 
-        return (
-          <div key={`order-${o.id}`}>
-            {/* 起點：乘客人像 */}
-            {pickup && typeof pickup.lat === 'number' && (
-              <Marker
-                position={[pickup.lat, pickup.lng]}
-                icon={passengerIcon}
-              >
-                <Popup>
-                  {t(lang, 'pickupMarkerTitle')}：{o.pickup}
-                </Popup>
-              </Marker>
-            )}
+      let carMarker = null
+      if (active && visibleToThisView && routeCoords && routeCoords.length >= 2) {
+        ensureSim(o.id)
 
-            {/* 終點：旗子 */}
-            {dropoff && typeof dropoff.lat === 'number' && (
-              <Marker
-                position={[dropoff.lat, dropoff.lng]}
-                icon={dropoffIcon}
-              >
-                <Popup>
-                  {t(lang, 'dropoffMarkerTitle')}：{o.dropoff}
-                </Popup>
-              </Marker>
-            )}
+        const { idx } = computeIndex(o.id)
+        const clamped = Math.min(idx, routeCoords.length - 1)
+        const [lat, lng] = routeCoords[clamped]
 
-            {/* 中途停靠點：1 / 2 / 3 數字圈 */}
-            {stops.map((s, idx) => {
-              if (
-                !s ||
-                typeof s.lat !== 'number' ||
-                typeof s.lng !== 'number'
-              ) {
-                return null
-              }
-              const icon = createStopIcon(idx + 1)
-              return (
-                <Marker
-                  key={`stop-${o.id}-${idx}`}
-                  position={[s.lat, s.lng]}
-                  icon={icon}
-                >
-                  <Popup>
-                    {t(lang, 'stopLabel')} #{idx + 1}
-                    <br />
-                    {s.label || s.text || ''}
-                  </Popup>
-                </Marker>
-              )
-            })}
+        // 完成偵測：到尾端 → 只觸發一次
+        if (clamped >= routeCoords.length - 1) {
+          const alreadyCompleted =
+            (completedOrderIds && completedOrderIds?.has && completedOrderIds.has(o.id)) || arrivedOnceRef.current.has(o.id)
 
-            {polyline}
-            {carMarker}
-          </div>
+          if (!alreadyCompleted) {
+            arrivedOnceRef.current.add(o.id)
+            completeSim(o.id)
+
+            // ✅ 清掉固定起點，避免測試/重整後污染
+            clearOrderStart(o.id)
+
+            onOrderArrived?.(o.id)
+            onOrderCompleted?.(o.id)
+          }
+        }
+
+        carMarker = (
+          <Marker key={`car-${o.id}`} position={[lat, lng]} icon={taxiIcon}>
+            <Popup>Order #{o.id}</Popup>
+          </Marker>
         )
-      }),
-    [orders, routesByOrder, movingCars, lang, mode, currentDriverId]
-  )
+      }
+
+      return (
+        <div key={`order-layer-${o.id}`}>
+          {pickup && typeof pickup.lat === 'number' && (
+            <Marker position={[pickup.lat, pickup.lng]} icon={passengerIcon}>
+              <Popup>
+                {t(lang, 'pickupMarkerTitle')}：{o.pickup}
+              </Popup>
+            </Marker>
+          )}
+
+          {dropoff && typeof dropoff.lat === 'number' && (
+            <Marker position={[dropoff.lat, dropoff.lng]} icon={dropoffIcon}>
+              <Popup>
+                {t(lang, 'dropoffMarkerTitle')}：{o.dropoff}
+              </Popup>
+            </Marker>
+          )}
+
+          {stops.map((s, idx2) => {
+            if (!s || typeof s.lat !== 'number' || typeof s.lng !== 'number') return null
+            return (
+              <Marker key={`stop-${o.id}-${idx2}`} position={[s.lat, s.lng]} icon={createStopIcon(idx2 + 1)}>
+                <Popup>
+                  {t(lang, 'stopLabel')} #{idx2 + 1}
+                  <br />
+                  {s.label || s.text || ''}
+                </Popup>
+              </Marker>
+            )
+          })}
+
+          {polyline}
+          {carMarker}
+        </div>
+      )
+    })
+    // tick 觸發車位置更新（Date.now 驅動）
+  }, [orders, routesByOrder, lang, mode, currentDriverId, completedOrderIds, onOrderArrived, onOrderCompleted, tick])
+
+  const previewGraphics = useMemo(() => {
+    if (!previewEnabled) return null
+
+    const pickup = previewMarkers?.pickup
+    const dropoff = previewMarkers?.dropoff
+    const stops = Array.isArray(previewMarkers?.stops) ? previewMarkers.stops : []
+
+    return (
+      <>
+        {pickup && typeof pickup.lat === 'number' && (
+          <Marker position={[pickup.lat, pickup.lng]} icon={passengerIcon}>
+            <Popup>{t(lang, 'pickupMarkerTitle')}</Popup>
+          </Marker>
+        )}
+
+        {stops.map((s, idx) => {
+          if (!s || typeof s.lat !== 'number' || typeof s.lng !== 'number') return null
+          return (
+            <Marker key={`preview-stop-${idx}`} position={[s.lat, s.lng]} icon={createStopIcon(idx + 1)}>
+              <Popup>
+                {t(lang, 'stopLabel')} #{idx + 1}
+                <br />
+                {s.label || ''}
+              </Popup>
+            </Marker>
+          )
+        })}
+
+        {dropoff && typeof dropoff.lat === 'number' && (
+          <Marker position={[dropoff.lat, dropoff.lng]} icon={dropoffIcon}>
+            <Popup>{t(lang, 'dropoffMarkerTitle')}</Popup>
+          </Marker>
+        )}
+
+        {previewRoute && previewRoute.length >= 2 && (
+          <Polyline key="preview-poly" positions={previewRoute} pathOptions={{ weight: 3 }} />
+        )}
+      </>
+    )
+  }, [previewEnabled, previewMarkers, previewRoute, lang])
 
   return (
-    <MapContainer
-      center={mapCenter}
-      zoom={13}
-      style={{ width: '100%', height: '100%' }}
-    >
+    <MapContainer center={mapCenter} zoom={13} style={{ width: '100%', height: '100%' }}>
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      {/* 司機端才啟用「點一下地圖設定位置」 */}
       {isDriverMode && currentDriverId && (
-        <DriverClickHandler
-          enabled
-          driverId={currentDriverId}
-          onLocationChange={onDriverLocationChange}
-        />
+        <DriverClickHandler enabled driverId={currentDriverId} onLocationChange={onDriverLocationChange} />
       )}
 
       {driverMarkers}
-      {orderGraphics}
+
+      {orders.length > 0 ? orderGraphics : previewGraphics}
     </MapContainer>
   )
 }

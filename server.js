@@ -2,108 +2,55 @@
 import express from 'express'
 import cors from 'cors'
 import path from 'path'
+import fs from 'fs'
 import { fileURLToPath } from 'url'
-import fetch from 'node-fetch'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const app = express()
+
+app.set('etag', false) // ✅ 關掉 ETag，避免 304
+
 app.use(cors())
 app.use(express.json())
 
-// ===== 小型「資料庫」：使用者 / 司機 / 訂單 =====
+// ✅ API 全部不快取（雙保險）
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store')
+  next()
+})
 
-// 使用者：註冊 / 登入 用
-// { id, username, password, role, carType }
+// ===== 小型「資料庫」：使用者 / 司機 / 訂單 =====
 let users = []
 let nextUserId = 1
 
-// 司機：地圖上那台車
-// { id, name, lat, lng, status, carType }
 let drivers = []
-
-// 訂單：包含經緯度與計價資訊
-// {
-//   id, pickup, dropoff,
-//   pickupLat, pickupLng,
-//   dropoffLat, dropoffLng,
-//   customer,
-//   status,        // 'pending' | 'assigned'
-//   driverId, driverName,
-//   distanceKm,    // 預估距離（整趟，含停靠點）
-//   vehicleType,   // 'YELLOW' | 'GREEN' | 'FHV'
-//   estimatedPrice,// 預估價格（同時也寫到 estimatedFare 以保留相容性）
-//   estimatedFare,
-//   stops: [       // ⭐ 中途停靠點
-//     { label, lat, lng },
-//   ],
-//   createdAt
-// }
-let orders = []
 let nextDriverId = 1
+
+let orders = []
 let nextOrderId = 1
 
-// 幾個分散在曼哈頓附近的起始點（現在暫時不用，但保留示意）
-const DRIVER_START_POSITIONS = [
-  { lat: 40.7580, lng: -73.9855 }, // Times Square
-  { lat: 40.7308, lng: -73.9973 }, // Washington Square Park
-  { lat: 40.7527, lng: -73.9772 }, // Grand Central
-  { lat: 40.7060, lng: -74.0086 }, // Wall Street
-  { lat: 40.7484, lng: -73.9857 }, // Empire State
-  { lat: 40.7712, lng: -73.9742 }, // Central Park South
-]
-let nextStartIndex = 0
-
-// 🔹 Geocode 掛掉時用的固定 demo 地點
 const FALLBACK_GEOCODE_PLACES = [
-  {
-    label: 'Times Square, Manhattan, New York, NY, USA',
-    lat: 40.7580,
-    lng: -73.9855,
-  },
-  {
-    label: 'Central Park, Manhattan, New York, NY, USA',
-    lat: 40.7829,
-    lng: -73.9654,
-  },
-  {
-    label: 'Grand Central Terminal, Manhattan, New York, NY, USA',
-    lat: 40.7527,
-    lng: -73.9772,
-  },
-  {
-    label: 'Wall Street, Manhattan, New York, NY, USA',
-    lat: 40.7060,
-    lng: -74.0086,
-  },
-  {
-    label: 'John F. Kennedy International Airport (JFK), New York, NY, USA',
-    lat: 40.6413,
-    lng: -73.7781,
-  },
-  {
-    label: 'LaGuardia Airport (LGA), New York, NY, USA',
-    lat: 40.7769,
-    lng: -73.8740,
-  },
+  { label: 'Times Square, Manhattan, New York, NY, USA', lat: 40.758, lng: -73.9855 },
+  { label: 'Central Park, Manhattan, New York, NY, USA', lat: 40.7829, lng: -73.9654 },
+  { label: 'Grand Central Terminal, Manhattan, New York, NY, USA', lat: 40.7527, lng: -73.9772 },
+  { label: 'Wall Street, Manhattan, New York, NY, USA', lat: 40.706, lng: -74.0086 },
+  { label: 'John F. Kennedy International Airport (JFK), New York, NY, USA', lat: 40.6413, lng: -73.7781 },
+  { label: 'LaGuardia Airport (LGA), New York, NY, USA', lat: 40.7769, lng: -73.874 },
 ]
-
-function getNextStartPosition() {
-  const pos =
-    DRIVER_START_POSITIONS[nextStartIndex % DRIVER_START_POSITIONS.length]
-  nextStartIndex += 1
-  return { ...pos }
-}
 
 function normalizeType(value) {
   if (typeof value !== 'string') return null
   return value.toUpperCase()
 }
 
-// =================== Auth API：註冊 / 登入 ===================
+function toNum(v) {
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? n : null
+}
 
-// 註冊：帳號不能重複
+// =================== Auth API：註冊 / 登入 ===================
 app.post('/api/register', (req, res) => {
   const { username, password, role, carType } = req.body
 
@@ -116,31 +63,27 @@ app.post('/api/register', (req, res) => {
 
   const existed = users.find(u => u.username === username)
   if (existed) {
-    // 帳號重複 → 409 Conflict
     return res.status(409).json({
       errorCode: 'USERNAME_TAKEN',
       error: 'Username already taken',
     })
   }
 
-  const carTypeUpper =
-    role === 'driver' && carType ? normalizeType(carType) : null
+  const carTypeUpper = role === 'driver' && carType ? normalizeType(carType) : null
 
   const user = {
     id: nextUserId++,
     username,
-    password, // Demo 用：實務上要做 hash
-    role,     // 'passenger' | 'driver'
+    password,
+    role,
     carType: carTypeUpper,
   }
   users.push(user)
-  console.log('New user registered:', user)
 
   const { password: _, ...safeUser } = user
   return res.json(safeUser)
 })
 
-// 登入：帳號必須存在，密碼要相符
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body
   if (!username || !password) {
@@ -169,22 +112,57 @@ app.post('/api/login', (req, res) => {
 })
 
 // =================== Geocode API ===================
-app.get('/api/geocode', async (req, res) => {
-  const q = req.query.q
-  const query = (q || '').trim()
+// =================== Geocode API ===================
 
-  if (!query) {
-    return res.json([])
+// ✅ 簡單快取（降低打到 Nominatim 的頻率）
+const geocodeCache = new Map() // key: queryLower -> { ts, data }
+const GEOCODE_CACHE_TTL_MS = 60_000
+
+// ✅ 簡單節流（Nominatim 公共服務很在意頻率）
+let lastNominatimAt = 0
+const NOMINATIM_MIN_INTERVAL_MS = 1100
+
+function filterFallbackPlaces(query) {
+  const q = String(query || '').trim().toLowerCase()
+  if (!q) return []
+  return FALLBACK_GEOCODE_PLACES
+    .filter(p => String(p.label || '').toLowerCase().includes(q))
+    .slice(0, 5)
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms))
+}
+
+app.get('/api/geocode', async (req, res) => {
+  const query = String(req.query.q || '').trim()
+  if (!query) return res.json([])
+
+  const key = query.toLowerCase()
+
+  // ✅ cache hit
+  const cached = geocodeCache.get(key)
+  if (cached && Date.now() - cached.ts < GEOCODE_CACHE_TTL_MS) {
+    return res.json(cached.data)
   }
 
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(
-      query
-    )}`
+    // ✅ throttle（避免太密集）
+    const now = Date.now()
+    const wait = NOMINATIM_MIN_INTERVAL_MS - (now - lastNominatimAt)
+    if (wait > 0) await sleep(wait)
+    lastNominatimAt = Date.now()
+
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(query)}`
 
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'taxi-dispatch-demo/1.0 (vivi39120@gmail.com)',
+        // 建議換成你自己的聯絡方式
+        'User-Agent': 'ny-taxi-dispatch-demo/1.0 (contact: your_email@example.com)',
+        'Accept': 'application/json',
+        'Accept-Language': 'en',
+        // 有些環境加 Referer 會更穩
+        'Referer': 'http://localhost',
       },
     })
 
@@ -193,23 +171,31 @@ app.get('/api/geocode', async (req, res) => {
     }
 
     const data = await response.json()
-
-    const results = data.map(item => ({
+    const results = (Array.isArray(data) ? data : []).map(item => ({
       label: item.display_name,
-      lat: parseFloat(item.lat),
-      lng: parseFloat(item.lon),
+      lat: Number(item.lat),
+      lng: Number(item.lon),
     }))
+
+    // ✅ cache store
+    geocodeCache.set(key, { ts: Date.now(), data: results })
 
     return res.json(results)
   } catch (err) {
-    console.error('Geocode failed, using fallback demo places:', err)
-    return res.json(FALLBACK_GEOCODE_PLACES)
+    console.error('Geocode failed, using fallback filtered places:', err)
+
+    // ✅ fallback 也要依 query 過濾，避免你看到永遠同一包
+    const filtered = filterFallbackPlaces(query)
+
+    // cache fallback too（避免每個字都一直噴錯誤）
+    geocodeCache.set(key, { ts: Date.now(), data: filtered })
+
+    return res.json(filtered)
   }
 })
 
-// =================== 司機登入 / 位置 ===================
 
-// ⭐ 不再給隨機起點：首次登入 lat / lng = null，請司機手動定位
+// =================== 司機登入 / 位置 ===================
 app.post('/api/driver-login', (req, res) => {
   const { name, carType } = req.body
   if (!name) return res.status(400).json({ error: 'name is required' })
@@ -227,11 +213,8 @@ app.post('/api/driver-login', (req, res) => {
       carType: carTypeUpper,
     }
     drivers.push(driver)
-    console.log('New driver registered (no initial position):', driver)
   } else {
-    if (carTypeUpper && !driver.carType) {
-      driver.carType = carTypeUpper
-    }
+    if (carTypeUpper && !driver.carType) driver.carType = carTypeUpper
   }
 
   res.json(driver)
@@ -248,15 +231,16 @@ app.patch('/api/drivers/:id/location', (req, res) => {
   const driver = drivers.find(d => d.id === id)
   if (!driver) return res.status(404).json({ error: 'driver not found' })
 
-  if (typeof lat === 'number') driver.lat = lat
-  if (typeof lng === 'number') driver.lng = lng
+  const nLat = toNum(lat)
+  const nLng = toNum(lng)
+  if (nLat != null) driver.lat = nLat
+  if (nLng != null) driver.lng = nLng
   if (typeof status === 'string') driver.status = status
 
   res.json(driver)
 })
 
 // =================== 訂單 API ===================
-
 app.post('/api/orders', (req, res) => {
   const {
     pickup,
@@ -278,30 +262,11 @@ app.post('/api/orders', (req, res) => {
   }
 
   const normalizedStops = Array.isArray(stops)
-    ? stops.map(s => {
-        const label =
-          typeof s.label === 'string'
-            ? s.label
-            : typeof s.text === 'string'
-            ? s.text
-            : ''
-
-        const lat =
-          typeof s.lat === 'number'
-            ? s.lat
-            : s.loc && typeof s.loc.lat === 'number'
-            ? s.loc.lat
-            : null
-
-        const lng =
-          typeof s.lng === 'number'
-            ? s.lng
-            : s.loc && typeof s.loc.lng === 'number'
-            ? s.loc.lng
-            : null
-
-        return { label, lat, lng }
-      })
+    ? stops.map(s => ({
+        label: typeof s?.label === 'string' ? s.label : typeof s?.text === 'string' ? s.text : '',
+        lat: toNum(s?.lat ?? s?.loc?.lat),
+        lng: toNum(s?.lng ?? s?.loc?.lng),
+      }))
     : []
 
   const finalPrice =
@@ -309,32 +274,37 @@ app.post('/api/orders', (req, res) => {
       ? estimatedPrice
       : typeof estimatedFare === 'number'
       ? estimatedFare
-      : null
+      : toNum(estimatedPrice) ?? toNum(estimatedFare)
+
+  const now = new Date().toISOString()
 
   const order = {
     id: nextOrderId++,
     pickup,
     dropoff,
-    pickupLat: typeof pickupLat === 'number' ? pickupLat : null,
-    pickupLng: typeof pickupLng === 'number' ? pickupLng : null,
-    dropoffLat: typeof dropoffLat === 'number' ? dropoffLat : null,
-    dropoffLng: typeof dropoffLng === 'number' ? dropoffLng : null,
+    pickupLat: toNum(pickupLat),
+    pickupLng: toNum(pickupLng),
+    dropoffLat: toNum(dropoffLat),
+    dropoffLng: toNum(dropoffLng),
     customer: customer || null,
+
     status: 'pending',
     driverId: null,
     driverName: null,
 
-    distanceKm: typeof distanceKm === 'number' ? distanceKm : null,
+    distanceKm: toNum(distanceKm),
     vehicleType: normalizeType(vehicleType),
     estimatedPrice: finalPrice,
     estimatedFare: finalPrice,
+
     stops: normalizedStops,
-    createdAt: new Date().toISOString(),
+
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
   }
 
   orders.push(order)
-  console.log('New order:', order)
-
   res.json(order)
 })
 
@@ -349,25 +319,72 @@ app.post('/api/orders/:id/assign', (req, res) => {
   const order = orders.find(o => o.id === id)
   if (!order) return res.status(404).json({ error: 'order not found' })
 
-  const driver = drivers.find(d => d.id === driverId)
+  const driver = drivers.find(d => d.id === Number(driverId))
   if (!driver) return res.status(404).json({ error: 'driver not found' })
 
-  order.status = 'assigned'
-  order.driverId = driverId
-  order.driverName = driverName || driver.name
-  driver.status = 'busy'
+  if (order.status === 'completed') {
+    return res.status(409).json({ error: 'order already completed' })
+  }
 
-  console.log('Order assigned:', order)
+  order.status = 'assigned'
+  order.driverId = driver.id
+  order.driverName = driverName || driver.name
+  order.updatedAt = new Date().toISOString()
+
+  driver.status = 'busy'
   res.json(order)
 })
 
-// =================== 前端靜態檔案 ===================
-const distPath = path.join(__dirname, 'dist')
-app.use(express.static(distPath))
+app.patch('/api/orders/:id/status', (req, res) => {
+  const id = Number(req.params.id)
+  const { status } = req.body
 
-app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'))
+  const order = orders.find(o => o.id === id)
+  if (!order) return res.status(404).json({ error: 'order not found' })
+
+  if (typeof status !== 'string' || !status.trim()) {
+    return res.status(400).json({ error: 'status is required' })
+  }
+
+  order.status = status.trim()
+  order.updatedAt = new Date().toISOString()
+
+  if (order.status === 'completed') {
+    order.completedAt = new Date().toISOString()
+    if (order.driverId != null) {
+      const driver = drivers.find(d => d.id === order.driverId)
+      if (driver) driver.status = 'idle'
+    }
+  }
+
+  res.json(order)
 })
+
+app.post('/api/orders/:id/complete', (req, res) => {
+  const id = Number(req.params.id)
+  const order = orders.find(o => o.id === id)
+  if (!order) return res.status(404).json({ error: 'order not found' })
+
+  order.status = 'completed'
+  order.updatedAt = new Date().toISOString()
+  order.completedAt = new Date().toISOString()
+
+  if (order.driverId != null) {
+    const driver = drivers.find(d => d.id === order.driverId)
+    if (driver) driver.status = 'idle'
+  }
+
+  res.json(order)
+})
+
+// =================== Production：前端靜態檔案（dist 存在才掛） ===================
+const distPath = path.join(__dirname, 'dist')
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath))
+  app.get(/^(?!\/api).*/, (req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'))
+  })
+}
 
 const PORT = process.env.PORT || 3000
 app.listen(PORT, '0.0.0.0', () => {

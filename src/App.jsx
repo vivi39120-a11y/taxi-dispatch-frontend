@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { languages, t } from './i18n'
 import RiderView from './views/RiderView.jsx'
@@ -24,43 +24,272 @@ function getInitialShowLandingFromUrl() {
   return role ? false : true
 }
 
+// ✅ 從網址判斷是否要直接開 AuthPage
+function getInitialShowAuthFromUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const auth = params.get('auth')
+  if (!auth) return false
+  return auth === '1' || auth.toLowerCase() === 'true' || auth.toLowerCase() === 'yes'
+}
+
+// ✅ 小工具：把 role/auth 同步到網址（避免刷新跑掉）
+function setUrlParams({ role, auth }) {
+  try {
+    const url = new URL(window.location.href)
+    if (role === 'driver') url.searchParams.set('role', 'driver')
+    else if (role === 'passenger') url.searchParams.set('role', 'passenger')
+    else url.searchParams.delete('role')
+
+    if (auth) url.searchParams.set('auth', '1')
+    else url.searchParams.delete('auth')
+
+    window.history.replaceState({}, '', url.toString())
+  } catch {}
+}
+
+// ✅ 每位司機獨立的 local storage key（避免互相覆蓋）
+function loadLocalDriverPos(driverId) {
+  if (!driverId) return null
+  try {
+    const raw = localStorage.getItem(`driverLoc:${driverId}`)
+    if (!raw) return null
+    const obj = JSON.parse(raw)
+    const lat = Number(obj?.lat)
+    const lng = Number(obj?.lng)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+    return { lat, lng }
+  } catch {
+    return null
+  }
+}
+
+function normalizeDriverLatLng(d) {
+  const lat = d?.lat
+  const lng = d?.lng
+  const nLat = typeof lat === 'number' ? lat : Number(lat)
+  const nLng = typeof lng === 'number' ? lng : Number(lng)
+  if (Number.isFinite(nLat) && Number.isFinite(nLng)) return { ...d, lat: nLat, lng: nLng }
+  return { ...d }
+}
+
+// ====== 車輛模擬全域同步（跨分頁） ======
+const SIM_GLOBAL_KEY = 'simGlobal:running'
+function readGlobalSimRunning() {
+  try {
+    const v = localStorage.getItem(SIM_GLOBAL_KEY)
+    if (v == null) return true
+    return v === '1' || v === 'true' || v === 'yes'
+  } catch {
+    return true
+  }
+}
+function writeGlobalSimRunning(v) {
+  try {
+    localStorage.setItem(SIM_GLOBAL_KEY, v ? '1' : '0')
+  } catch {}
+}
+
+// ====== 已完成訂單：本機覆蓋（避免 polling 洗回去）=====
+const COMPLETED_META_KEY = 'completedOrdersMeta' // { [orderId]: { completedAtISO } }
+function loadCompletedMeta() {
+  try {
+    const raw = localStorage.getItem(COMPLETED_META_KEY)
+    if (!raw) return {}
+    const obj = JSON.parse(raw)
+    return obj && typeof obj === 'object' ? obj : {}
+  } catch {
+    return {}
+  }
+}
+function saveCompletedMeta(meta) {
+  try {
+    localStorage.setItem(COMPLETED_META_KEY, JSON.stringify(meta || {}))
+  } catch {}
+}
+
 export default function App() {
   const [lang, setLang] = useState('zh')
   const [mode, setMode] = useState(getInitialModeFromUrl)
   const [showLanding, setShowLanding] = useState(getInitialShowLandingFromUrl)
-  const [showAuth, setShowAuth] = useState(false)
+  const [showAuth, setShowAuth] = useState(getInitialShowAuthFromUrl)
   const [showHeatmap, setShowHeatmap] = useState(false)
 
-  // currentUser: { id, username, role, carType }
+  const [authReturnTo, setAuthReturnTo] = useState('landing')
+
+  const [riderDraft, setRiderDraft] = useState({
+    pickupText: '',
+    dropoffText: '',
+    pickupLoc: null,
+    dropoffLoc: null,
+    stops: [],
+    composerLocked: false,
+    composeMode: false,
+    selectedOrderId: null,
+  })
+
   const [currentUser, setCurrentUser] = useState(null)
 
-  // 司機 / 訂單
-  const [drivers, setDrivers] = useState([]) // [{id,name,lat,lng,status,carType}]
-  const [orders, setOrders] = useState([])   // [{id,pickup,...}]
+  const [drivers, setDrivers] = useState([])
+  const [orders, setOrders] = useState([])
 
   const [currentDriverId, setCurrentDriverId] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [simulateVehicles, setSimulateVehicles] = useState(true)
 
-  // ✅ 每位司機各自的 hotspot 起點
-  // { [driverId]: {lat, lng} }
+  const [simulateVehicles, setSimulateVehicles] = useState(() => readGlobalSimRunning())
   const [driverHotspotPosById, setDriverHotspotPosById] = useState({})
 
-  // ===== 從 API 抓資料 =====
+  const completedMetaRef = useRef(loadCompletedMeta())
+
+  const openAuth = (returnTo = 'landing', targetRole = null) => {
+    setAuthReturnTo(returnTo)
+    setShowAuth(true)
+    setShowLanding(false)
+
+    setUrlParams({
+      role: targetRole === 'driver' ? 'driver' : targetRole === 'passenger' ? 'passenger' : null,
+      auth: true,
+    })
+  }
+
+  const closeAuth = (forceReturnTo = null) => {
+    const dest = forceReturnTo || authReturnTo
+
+    setShowAuth(false)
+    setShowLanding(dest === 'landing')
+
+    if (dest === 'driver') setMode('driver')
+    if (dest === 'rider') setMode('rider')
+
+    if (dest === 'driver') setUrlParams({ role: 'driver', auth: false })
+    else if (dest === 'rider') setUrlParams({ role: 'passenger', auth: false })
+    else setUrlParams({ role: null, auth: false })
+  }
+
+  useEffect(() => {
+    const syncFromUrl = () => {
+      const params = new URLSearchParams(window.location.search)
+
+      const role = params.get('role')
+      if (role === 'driver') {
+        setMode('driver')
+        setShowLanding(false)
+      } else if (role === 'passenger') {
+        setMode('rider')
+        setShowLanding(false)
+      }
+
+      const auth = params.get('auth')
+      const shouldAuth =
+        auth === '1' ||
+        (typeof auth === 'string' && (auth.toLowerCase() === 'true' || auth.toLowerCase() === 'yes'))
+
+      if (shouldAuth) {
+        setShowAuth(true)
+        setShowLanding(false)
+      } else {
+        setShowAuth(false)
+      }
+    }
+
+    window.addEventListener('popstate', syncFromUrl)
+    return () => window.removeEventListener('popstate', syncFromUrl)
+  }, [])
+
+  useEffect(() => {
+    const onStorage = e => {
+      if (e.key === SIM_GLOBAL_KEY) {
+        setSimulateVehicles(readGlobalSimRunning())
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
+  const toggleSimulateVehicles = () => {
+    setSimulateVehicles(prev => {
+      const next = !prev
+      writeGlobalSimRunning(next)
+      return next
+    })
+  }
+
+  // ✅ 完成訂單：本機覆蓋 + 回寫後端
+  const markOrderCompleted = async orderId => {
+    if (orderId == null) return
+    const idNum = Number(orderId)
+    if (!Number.isFinite(idNum)) return
+
+    const nowISO = new Date().toISOString()
+
+    const meta = { ...(completedMetaRef.current || {}) }
+    if (!meta[idNum]) meta[idNum] = { completedAtISO: nowISO }
+    completedMetaRef.current = meta
+    saveCompletedMeta(meta)
+
+    setOrders(prev =>
+      prev.map(o => {
+        if (Number(o?.id) !== idNum) return o
+        return { ...o, status: 'completed', completedAt: o.completedAt || nowISO }
+      })
+    )
+
+    try {
+      await fetch(`/api/orders/${idNum}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        body: JSON.stringify({ status: 'completed' }),
+        cache: 'no-store',
+      })
+    } catch (e) {
+      console.warn('markOrderCompleted: backend update failed', e)
+    }
+  }
+
+  // ✅ 拉資料：強制 no-store，避免 304 造成 res.ok=false
   const fetchAll = async () => {
     try {
       setError('')
-      const [dRes, oRes] = await Promise.all([
-        fetch('/api/drivers'),
-        fetch('/api/orders'),
-      ])
-      if (!dRes.ok || !oRes.ok) throw new Error('API error')
 
-      const dData = await dRes.json()
-      const oData = await oRes.json()
-      setDrivers(dData)
-      setOrders(oData)
+      const [dRes, oRes] = await Promise.all([
+        fetch('/api/drivers', { cache: 'no-store', headers: { 'Cache-Control': 'no-store' } }),
+        fetch('/api/orders', { cache: 'no-store', headers: { 'Cache-Control': 'no-store' } }),
+      ])
+
+      if (!dRes.ok || !oRes.ok) {
+        throw new Error(`API error: drivers=${dRes.status}, orders=${oRes.status}`)
+      }
+
+      const dDataRaw = await dRes.json()
+      const oDataRaw = await oRes.json()
+
+      let mergedDrivers = Array.isArray(dDataRaw) ? dDataRaw.map(normalizeDriverLatLng) : []
+
+      if (currentDriverId) {
+        const lp = loadLocalDriverPos(currentDriverId)
+        if (lp) {
+          mergedDrivers = mergedDrivers.map(d =>
+            Number(d.id) === Number(currentDriverId) ? { ...d, lat: lp.lat, lng: lp.lng } : d
+          )
+        }
+      }
+
+      const meta = completedMetaRef.current || {}
+      const mergedOrders = Array.isArray(oDataRaw)
+        ? oDataRaw.map(o => {
+            const idNum = Number(o?.id)
+            if (!Number.isFinite(idNum)) return o
+            if (!meta[idNum]) return o
+            return {
+              ...o,
+              status: 'completed',
+              completedAt: o.completedAt || meta[idNum]?.completedAtISO || new Date().toISOString(),
+            }
+          })
+        : []
+
+      setDrivers(mergedDrivers)
+      setOrders(mergedOrders)
     } catch (err) {
       console.error(err)
       setError(t(lang, 'cannotConnectServer'))
@@ -74,7 +303,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ===== 訂單 + 座標 =====
   const ordersWithLocations = useMemo(
     () =>
       orders.map(o => {
@@ -88,54 +316,39 @@ export default function App() {
             ? { lat: o.dropoffLat, lng: o.dropoffLng }
             : resolveLocation(o.dropoff)
 
-        return { ...o, pickupLocation, dropoffLocation }
+        const stops = Array.isArray(o.stops)
+          ? o.stops
+              .map(s => {
+                const lat = Number(s?.lat)
+                const lng = Number(s?.lng)
+                if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { ...s }
+                return { ...s, lat, lng }
+              })
+              .filter(Boolean)
+          : []
+
+        return { ...o, pickupLocation, dropoffLocation, stops }
       }),
     [orders]
   )
 
-  // 目前登入乘客自己的訂單（不含座標）
   const passengerOrders = useMemo(() => {
     if (!currentUser || currentUser.role !== 'passenger') return []
     return orders.filter(o => o.customer === currentUser.username)
   }, [orders, currentUser])
 
-  // 目前登入乘客自己的訂單 + 座標
   const passengerOrdersWithLoc = useMemo(() => {
     if (!currentUser || currentUser.role !== 'passenger') return []
     return ordersWithLocations.filter(o => o.customer === currentUser.username)
   }, [ordersWithLocations, currentUser])
 
-  // 司機端直接用全部訂單＋座標
   const driverOrdersWithLoc = ordersWithLocations
 
-  // 乘客端地圖要顯示哪些司機：
-  const riderVisibleDrivers = useMemo(() => {
-    if (!currentUser || currentUser.role !== 'passenger') return []
-
-    const assigned = orders.find(
-      o =>
-        o.customer === currentUser.username &&
-        o.status === 'assigned' &&
-        o.driverId
-    )
-    if (!assigned) return []
-
-    const d = drivers.find(dr => dr.id === assigned.driverId)
-    return d ? [d] : []
-  }, [orders, drivers, currentUser])
-
-  // ===== 乘客下單 =====
-  const createOrder = async (
-    pickup,
-    dropoff,
-    pickupLoc,
-    dropoffLoc,
-    fareInfo,
-    stops = []
-  ) => {
+  const createOrder = async (pickup, dropoff, pickupLoc, dropoffLoc, fareInfo, stops = []) => {
     if (!pickup.trim() || !dropoff.trim()) return
+
     if (!currentUser || currentUser.role !== 'passenger') {
-      alert(t(lang, 'needLoginPassenger'))
+      openAuth('rider', 'passenger')
       return
     }
 
@@ -146,7 +359,8 @@ export default function App() {
     try {
       const res = await fetch('/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        cache: 'no-store',
         body: JSON.stringify({
           pickup,
           dropoff,
@@ -157,8 +371,8 @@ export default function App() {
           dropoffLng: dropoffLoc?.lng ?? null,
           vehicleType: fareInfo?.vehicleType || null,
           distanceKm: fareInfo?.distanceKm ?? null,
-          estimatedFare: fareInfo?.price ?? null,   // USD
-          estimatedPrice: fareInfo?.price ?? null,  // USD
+          estimatedFare: fareInfo?.price ?? null,
+          estimatedPrice: fareInfo?.price ?? null,
           stops: safeStops,
         }),
       })
@@ -176,14 +390,13 @@ export default function App() {
     }
   }
 
-  // ===== 司機接單（指派司機給訂單）=====
   const acceptOrder = async orderId => {
     if (!currentUser || currentUser.role !== 'driver') {
-      alert(t(lang, 'needLoginDriver'))
+      openAuth('driver', 'driver')
       return
     }
     if (!currentDriverId) {
-      alert(t(lang, 'needBindDriverVehicle'))
+      alert(t(lang, 'needBindDriverVehicle') || '請先綁定司機車輛')
       return
     }
 
@@ -194,7 +407,8 @@ export default function App() {
     try {
       const res = await fetch(`/api/orders/${orderId}/assign`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        cache: 'no-store',
         body: JSON.stringify({
           driverId: currentDriverId,
           driverName: driverNameLabel,
@@ -208,7 +422,7 @@ export default function App() {
 
       setOrders(prev => prev.map(o => (o.id === updatedOrder.id ? updatedOrder : o)))
       setDrivers(prev =>
-        prev.map(d => (d.id === updatedOrder.driverId ? { ...d, status: 'busy' } : d))
+        prev.map(d => (Number(d.id) === Number(updatedOrder.driverId) ? { ...d, status: 'busy' } : d))
       )
     } catch (err) {
       console.error(err)
@@ -218,34 +432,34 @@ export default function App() {
     }
   }
 
-  // ===== 司機登入後建立自己的車 =====
   const attachDriverForUser = async user => {
     if (!user || user.role !== 'driver') return
 
     try {
       const res = await fetch('/api/driver-login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        cache: 'no-store',
         body: JSON.stringify({
           name: user.username,
           carType: user.carType || null,
         }),
       })
       if (!res.ok) throw new Error('driver-login failed')
-      const driver = await res.json()
+      const driverRaw = await res.json()
+      const driver = normalizeDriverLatLng(driverRaw)
 
       setCurrentDriverId(driver.id)
       setDrivers(prev => {
-        const exists = prev.some(d => d.id === driver.id)
+        const exists = prev.some(d => Number(d.id) === Number(driver.id))
         return exists ? prev : [...prev, driver]
       })
 
-      // ✅ 記錄這位司機的 hotspot 起點（各自一份）
-      if (typeof driver.lat === 'number' && typeof driver.lng === 'number') {
-        setDriverHotspotPosById(prev => ({
-          ...prev,
-          [driver.id]: { lat: driver.lat, lng: driver.lng },
-        }))
+      const lp = loadLocalDriverPos(driver.id)
+      if (lp) {
+        setDriverHotspotPosById(prev => ({ ...prev, [driver.id]: { lat: lp.lat, lng: lp.lng } }))
+      } else if (typeof driver.lat === 'number' && typeof driver.lng === 'number') {
+        setDriverHotspotPosById(prev => ({ ...prev, [driver.id]: { lat: driver.lat, lng: driver.lng } }))
       }
     } catch (err) {
       console.error(err)
@@ -253,22 +467,17 @@ export default function App() {
     }
   }
 
-  // 司機在地圖點擊後，前端同步更新那台車的位置，並記住給熱點頁用（各自一份）
   const handleDriverLocationChange = ({ id, lat, lng }) => {
-    setDrivers(prev => prev.map(d => (d.id === id ? { ...d, lat, lng } : d)))
-
-    setDriverHotspotPosById(prev => ({
-      ...prev,
-      [id]: { lat, lng },
-    }))
+    setDrivers(prev => prev.map(d => (Number(d.id) === Number(id) ? { ...d, lat, lng } : d)))
+    setDriverHotspotPosById(prev => ({ ...prev, [id]: { lat, lng } }))
   }
 
-  // ===== Auth：註冊 / 登入（呼叫後端）=====
   const registerUser = async ({ username, password, role, carType }) => {
     try {
       const res = await fetch('/api/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        cache: 'no-store',
         body: JSON.stringify({
           username,
           password,
@@ -299,13 +508,17 @@ export default function App() {
 
       if (user.role === 'driver') {
         setMode('driver')
+        setShowLanding(false)
         attachDriverForUser(user)
+        setUrlParams({ role: 'driver', auth: false })
+        closeAuth('driver')
       } else {
         setMode('rider')
+        setShowLanding(false)
+        setUrlParams({ role: 'passenger', auth: false })
+        closeAuth('rider')
       }
 
-      setShowAuth(false)
-      setShowLanding(false)
       return { ok: true }
     } catch (err) {
       console.error(err)
@@ -317,7 +530,8 @@ export default function App() {
     try {
       const res = await fetch('/api/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        cache: 'no-store',
         body: JSON.stringify({ username, password }),
       })
 
@@ -346,13 +560,17 @@ export default function App() {
 
       if (user.role === 'driver') {
         setMode('driver')
+        setShowLanding(false)
         attachDriverForUser(user)
+        setUrlParams({ role: 'driver', auth: false })
+        closeAuth('driver')
       } else {
         setMode('rider')
+        setShowLanding(false)
+        setUrlParams({ role: 'passenger', auth: false })
+        closeAuth('rider')
       }
 
-      setShowAuth(false)
-      setShowLanding(false)
       return { ok: true }
     } catch (err) {
       console.error(err)
@@ -360,7 +578,6 @@ export default function App() {
     }
   }
 
-  // ===== 共用 props =====
   const baseProps = {
     lang,
     loading,
@@ -372,26 +589,33 @@ export default function App() {
     refresh: fetchAll,
     currentUser,
     simulateVehicles,
+    onOpenAuth: openAuth,
+    onOrderCompleted: markOrderCompleted,
   }
 
-  // ===== 首頁 / Auth =====
   if (showLanding) {
     return (
       <LandingPage
         lang={lang}
         onChangeLang={setLang}
-        onPassengerClick={() => {
+        onPassengerClick={draft => {
+          if (draft) {
+            setRiderDraft(prev => ({
+              ...prev,
+              ...draft,
+              stops: Array.isArray(draft.stops) ? draft.stops : prev.stops,
+            }))
+          }
           setMode('rider')
           setShowLanding(false)
+          setUrlParams({ role: 'passenger', auth: false })
         }}
         onDriverClick={() => {
           setMode('driver')
           setShowLanding(false)
+          setUrlParams({ role: 'driver', auth: false })
         }}
-        onAuthClick={() => {
-          setShowAuth(true)
-          setShowLanding(false)
-        }}
+        onAuthClick={() => openAuth('landing')}
       />
     )
   }
@@ -403,25 +627,9 @@ export default function App() {
           <div className="top-bar-left">
             <span className="app-title">{t(lang, 'appTitle')}</span>
           </div>
-
           <div className="top-bar-center" />
-
           <div className="top-bar-right">
-            {currentUser && (
-              <span className="header-user-label">
-                {currentUser.role === 'driver'
-                  ? `${t(lang, 'driverPrefix')}${currentUser.username}`
-                  : `${t(lang, 'passengerPrefix')}${currentUser.username}`}
-              </span>
-            )}
-
-            <button
-              type="button"
-              className="header-back-btn"
-              onClick={() => {
-                window.location.href = '/'
-              }}
-            >
+            <button type="button" className="header-back-btn" onClick={() => closeAuth()}>
               {t(lang, 'backHome')}
             </button>
 
@@ -435,34 +643,20 @@ export default function App() {
               </select>
             </div>
 
-            <button
-              type="button"
-              className="sim-toggle-btn"
-              onClick={() => setSimulateVehicles(v => !v)}
-            >
+            <button type="button" className="sim-toggle-btn" onClick={toggleSimulateVehicles}>
               {simulateVehicles ? t(lang, 'stopVehicleSim') : t(lang, 'startVehicleSim')}
             </button>
           </div>
         </header>
 
         <main className="auth-main">
-          <AuthPage
-            lang={lang}
-            onBack={() => {
-              setShowAuth(false)
-              setShowLanding(true)
-            }}
-            onRegister={registerUser}
-            onLogin={loginUser}
-          />
+          <AuthPage lang={lang} onBack={() => closeAuth()} onRegister={registerUser} onLogin={loginUser} />
         </main>
       </div>
     )
   }
 
-  // ✅ 這裡開始：主畫面永遠渲染，不會被 showHeatmap 取代（避免路徑消失）
-  const heatmapPosition =
-    (currentDriverId && driverHotspotPosById[currentDriverId]) || null
+  const heatmapPosition = (currentDriverId && driverHotspotPosById[currentDriverId]) || null
 
   return (
     <div className="app-root" style={{ position: 'relative' }}>
@@ -510,12 +704,7 @@ export default function App() {
             </select>
           </div>
 
-          <button
-            className="ghost-btn"
-            type="button"
-            onClick={() => setSimulateVehicles(v => !v)}
-            style={{ marginLeft: 8 }}
-          >
+          <button className="ghost-btn" type="button" onClick={toggleSimulateVehicles} style={{ marginLeft: 8 }}>
             {simulateVehicles ? t(lang, 'stopVehicleSim') : t(lang, 'startVehicleSim')}
           </button>
         </div>
@@ -525,9 +714,11 @@ export default function App() {
         {mode === 'rider' ? (
           <RiderView
             {...baseProps}
-            drivers={riderVisibleDrivers}
+            drivers={drivers}
             orders={passengerOrders}
             ordersWithLocations={passengerOrdersWithLoc}
+            initialDraft={riderDraft}
+            onDraftChange={setRiderDraft}
           />
         ) : (
           <DriverView
@@ -540,21 +731,9 @@ export default function App() {
         )}
       </main>
 
-      {/* ✅ 熱點頁改成 overlay：不會卸載主畫面，自然不會讓路徑消失 */}
       {showHeatmap && (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 9999,
-            background: '#000000',
-          }}
-        >
-          <DriverPage
-            onBack={() => setShowHeatmap(false)}
-            driverId={currentDriverId}
-            driverPosition={heatmapPosition}
-          />
+        <div style={{ position: 'absolute', inset: 0, zIndex: 9999, background: '#000000' }}>
+          <DriverPage onBack={() => setShowHeatmap(false)} driverId={currentDriverId} driverPosition={heatmapPosition} />
         </div>
       )}
     </div>

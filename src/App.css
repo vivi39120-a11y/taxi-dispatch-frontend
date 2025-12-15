@@ -122,3 +122,63 @@
   border: 2px solid #fff;
   box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
 }
+/* 讓自動完成下拉選單的字是黑的、背景是白的 */
+.autocomplete-wrapper {
+  position: relative;
+}
+
+.autocomplete-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  overflow: hidden;
+  z-index: 9999;
+}
+
+.autocomplete-item {
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+
+  /* 重點：字要黑 */
+  color: #111111 !important;
+}
+
+.autocomplete-item:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.autocomplete-wrapper { position: relative; }
+
+.autocomplete-dropdown{
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 99999;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.15);
+  max-height: 260px;
+  overflow: auto;
+}
+
+.autocomplete-item{
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  color: #111;          /* 文字變黑 */
+  cursor: pointer;
+}
+
+.autocomplete-item:hover{
+  background: rgba(0,0,0,0.06);
+}

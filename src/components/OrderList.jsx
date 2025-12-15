@@ -1,137 +1,98 @@
 // src/components/OrderList.jsx
-import { resolveLocation } from '../locationResolver.js'
+import React from 'react'
+import { t } from '../i18n'
 
 export default function OrderList({
+  lang = 'zh',
   orders = [],
+  drivers = [],
+
+  // driver view（原本）
   isDriverView = false,
   onAcceptOrder,
-  drivers = [],
-  currentDriverId, // 目前沒用到，但保留參數
+  currentDriverId,
+
+  // optional
+  onSelectOrder,
+  selectedOrderId,
+  completedOrderIds,
 }) {
-  // 備援用的距離計算（km）
-  function distanceKm(a, b) {
-    if (!a || !b) return null
-    const toRad = d => (d * Math.PI) / 180
-    const R = 6371
-    const dLat = toRad(b.lat - a.lat)
-    const dLng = toRad(b.lng - a.lng)
-    const la1 = toRad(a.lat)
-    const la2 = toRad(b.lat)
+  const completedSet = completedOrderIds instanceof Set ? completedOrderIds : new Set()
 
-    const s =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(la1) * Math.cos(la2) *
-      Math.sin(dLng / 2) * Math.sin(dLng / 2)
-
-    const c = 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s))
-    const d = R * c
-    return d
+  const getDriverName = driverId => {
+    const d = drivers.find(x => x.id === driverId)
+    return d?.name || d?.username || (driverId != null ? `#${driverId}` : '')
   }
 
-  // 共用：取得訂單距離（km）
-  function getDistanceKm(order) {
-    if (typeof order.distanceKm === 'number') {
-      return order.distanceKm
-    }
-
-    const pickupLoc =
-      order.pickupLocation ||
-      (typeof order.pickupLat === 'number' &&
-      typeof order.pickupLng === 'number'
-        ? { lat: order.pickupLat, lng: order.pickupLng }
-        : resolveLocation(order.pickup))
-
-    const dropoffLoc =
-      order.dropoffLocation ||
-      (typeof order.dropoffLat === 'number' &&
-      typeof order.dropoffLng === 'number'
-        ? { lat: order.dropoffLat, lng: order.dropoffLng }
-        : resolveLocation(order.dropoff))
-
-    if (!pickupLoc || !dropoffLoc) return null
-
-    const d = distanceKm(pickupLoc, dropoffLoc)
-    return d != null ? Math.round(d * 10) / 10 : null
-  }
-
-  // 共用：取得訂單價格（USD）
-  function getPrice(order) {
-    if (typeof order.price === 'number') return order.price
-    if (typeof order.estimatedFare === 'number') return order.estimatedFare
-    if (typeof order.estimatedPrice === 'number') return order.estimatedPrice
-    return null
+  if (!orders || orders.length === 0) {
+    return <div className="auth-hint">{t(lang, 'noOrders') || 'No orders'}</div>
   }
 
   return (
-    <ul className="orders-list">
-      {orders.map(order => {
-        const driverObj = drivers.find(d => d.id === order.driverId)
+    <div className="order-list">
+      {orders.map(o => {
+        const oid = Number(o.id)
+        const isCompleted = completedSet.has(oid)
+        const isSelected = selectedOrderId != null && o.id === selectedOrderId
 
-        const driverLabel =
-          order.driverName ||
-          (driverObj && driverObj.name) ||
-          (order.driverId != null ? `Driver #${order.driverId}` : '未知司機')
+        const cardStyle = {
+          opacity: isCompleted ? 0.5 : 1,
+          border: isSelected ? '1px solid #00e676' : undefined,
+        }
 
-        const distKm = getDistanceKm(order)
-        const price = getPrice(order)
-
-        const vehicleLabel = order.vehicleType
-          ? order.vehicleType.toUpperCase()
-          : null
-
-        const dispatchScore =
-          isDriverView && typeof order.dispatchScore === 'number'
-            ? order.dispatchScore
-            : null
+        const handleClick = () => {
+          if (isDriverView) return
+          onSelectOrder?.(o.id)
+        }
 
         return (
-          <li key={order.id} className="order-item">
-            <div className="order-main">
-              <div className="order-title">
-                {order.pickup} → {order.dropoff}
+          <div
+            key={o.id}
+            className="order-card"
+            style={cardStyle}
+            role={!isDriverView ? 'button' : undefined}
+            onClick={handleClick}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ fontWeight: 700 }}>
+                Order #{o.id}
+                {isCompleted && <span style={{ marginLeft: 10, color: 'red', fontWeight: 800 }}>已完成</span>}
               </div>
-
-              <div className="order-status">
-                {order.status === 'pending'
-                  ? '等待司機接單'
-                  : order.status === 'assigned'
-                  ? `已派遣司機（ ${driverLabel} ）`
-                  : order.status}
-              </div>
-
-              {/* 車種 / 距離 / 預估價格 / 派遣分數 */}
-              <div className="order-meta">
-                {vehicleLabel && <span>車種：{vehicleLabel}</span>}
-                {typeof distKm === 'number' && (
-                  <span>
-                    {vehicleLabel ? ' ・' : ''}
-                    距離：約 {distKm.toFixed(1)} 公里
-                  </span>
-                )}
-                {typeof price === 'number' && (
-                  <span>
-                    {' ・'}預估價：約 $ {price.toFixed(2)}
-                  </span>
-                )}
-                {dispatchScore != null && (
-                  <span>{' ・'}派遣分數：{dispatchScore} / 10</span>
-                )}
+              <div style={{ opacity: 0.8 }}>
+                {o.status ? String(o.status) : ''}
               </div>
             </div>
 
-            {isDriverView && order.status === 'pending' && (
-              <button
-                className="secondary-btn"
-                type="button"
-                onClick={() => onAcceptOrder && onAcceptOrder(order.id)}
-              >
-                接單
-              </button>
+            <div style={{ marginTop: 6, opacity: 0.9 }}>
+              <div>Pickup: {o.pickup}</div>
+              <div>Dropoff: {o.dropoff}</div>
+              {Array.isArray(o.stops) && o.stops.length > 0 && (
+                <div>Stops: {o.stops.map(s => s.label || s.text || '').filter(Boolean).join(' / ')}</div>
+              )}
+            </div>
+
+            {o.driverId != null && (
+              <div style={{ marginTop: 6, opacity: 0.85 }}>
+                Driver: {getDriverName(o.driverId)}
+              </div>
             )}
-          </li>
+
+            {/* driver view：保留你原本的接單按鈕 */}
+            {isDriverView && o.status === 'pending' && (
+              <div style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="primary-btn"
+                  onClick={() => onAcceptOrder?.(o.id)}
+                  disabled={!currentDriverId}
+                >
+                  {t(lang, 'acceptOrder') || 'Accept'}
+                </button>
+              </div>
+            )}
+          </div>
         )
       })}
-    </ul>
+    </div>
   )
 }
-
