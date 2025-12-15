@@ -1,3 +1,4 @@
+
 // src/views/RiderView.jsx
 import { useEffect, useMemo, useRef, useState } from 'react'
 import MapView from '../components/MapView.jsx'
@@ -291,9 +292,7 @@ export default function RiderView({
     const controller = new AbortController()
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/geocode?q=${encodeURIComponent(pickupText.trim())}`, {
-          signal: controller.signal,
-        })
+        const res = await fetch(`/api/geocode?q=${encodeURIComponent(pickupText.trim())}`, { signal: controller.signal })
         if (!res.ok) return
         const data = normalizeGeocodeList(await res.json().catch(() => []))
         setPickupSuggestions(data)
@@ -321,9 +320,7 @@ export default function RiderView({
     const controller = new AbortController()
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/geocode?q=${encodeURIComponent(dropoffText.trim())}`, {
-          signal: controller.signal,
-        })
+        const res = await fetch(`/api/geocode?q=${encodeURIComponent(dropoffText.trim())}`, { signal: controller.signal })
         if (!res.ok) return
         const data = normalizeGeocodeList(await res.json().catch(() => []))
         setDropoffSuggestions(data)
@@ -573,14 +570,7 @@ export default function RiderView({
     resetComposerInputs()
   }
 
-  // ✅ 到達（例如到上車點）只提示，不算完成
   const handleOrderArrived = orderId => {
-    setCompleteToast('司機已抵達上車點')
-    setTimeout(() => setCompleteToast(''), 2500)
-  }
-
-  // ✅ 真的完成（跑完整段）才加入 completed 並同步回 App
-  const handleOrderCompletedLocal = orderId => {
     setCompletedOrderIds(prev => {
       const next = new Set(prev)
       next.add(orderId)
@@ -588,8 +578,6 @@ export default function RiderView({
     })
     setCompleteToast('訂單已完成，感謝您的搭乘~')
     setTimeout(() => setCompleteToast(''), 3500)
-
-    onOrderCompleted?.(orderId)
   }
 
   const ordersForMap = useMemo(() => {
@@ -622,7 +610,7 @@ export default function RiderView({
           simulateVehicles={simulateVehicles}
           completedOrderIds={completedOrderIds}
           onOrderArrived={handleOrderArrived}
-          onOrderCompleted={handleOrderCompletedLocal}
+          onOrderCompleted={onOrderCompleted} // ✅ 回寫 completed（司機端也會同步）
           previewEnabled={shouldShowPreview}
           previewWaypoints={previewWaypoints}
           previewMarkers={previewMarkers}
@@ -691,6 +679,7 @@ export default function RiderView({
                           setComposeMode(true)
                           handleSelectPickup(item)
                         }}
+                        style={{ color: '#111' }}
                       >
                         {item.label}
                       </button>
@@ -739,6 +728,7 @@ export default function RiderView({
                               setComposeMode(true)
                               handleSelectStopSuggestion(index, item)
                             }}
+                            style={{ color: '#111' }}
                           >
                             {item.label}
                           </button>
@@ -792,6 +782,7 @@ export default function RiderView({
                           setComposeMode(true)
                           handleSelectDropoff(item)
                         }}
+                        style={{ color: '#111' }}
                       >
                         {item.label}
                       </button>
@@ -877,4 +868,4 @@ export default function RiderView({
       </aside>
     </section>
   )
-}
+} 
