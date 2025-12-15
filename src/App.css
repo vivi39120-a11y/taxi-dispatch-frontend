@@ -238,22 +238,3 @@
 
 .order-footer .dim { opacity: 0.75; }
 
-/* ===== 歷史訂單（已完成）：框＋字體淡灰 ===== */
-.order-card.completed{
-  opacity: 0.72;
-  border-style: dashed;
-  color: rgba(255, 255, 255, 0.55);
-}
-
-.order-card.completed .dim,
-.order-card.completed .order-id {
-  color: rgba(255, 255, 255, 0.42);
-}
-
-.order-card.completed .badge { opacity: 0.75; }
-
-.order-card.completed:hover {
-  border-color: rgba(255, 255, 255, 0.18);
-  box-shadow: none;
-  transform: none;
-}
