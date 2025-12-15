@@ -112,133 +112,86 @@ app.post('/api/login', (req, res) => {
 })
 
 // =================== Geocode API ===================
-// =================== Geocode API ===================
 
-// ✅ 簡單快取（降低打到 Nominatim 的頻率）
-const geocodeCache = new Map() // key: queryLower -> { ts, data }
-const GEOCODE_CACHE_TTL_MS = 60_000
-
-// ✅ 簡單節流（Nominatim 公共服務很在意頻率）
-let lastNominatimAt = 0
-const NOMINATIM_MIN_INTERVAL_MS = 1100
-
-function filterFallbackPlaces(query) {
+// 依 query 做 fallback 過濾（讓 nyc 也有結果）
+function fallbackGeocode(query) {
   const q = String(query || '').trim().toLowerCase()
   if (!q) return []
-  return FALLBACK_GEOCODE_PLACES
-    .filter(p => String(p.label || '').toLowerCase().includes(q))
-    .slice(0, 5)
-}
 
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms))
+  // 特別處理常見縮寫
+  const tokens = new Set(q.split(/\s+/).filter(Boolean))
+  if (q === 'nyc') {
+    tokens.add('new')
+    tokens.add('york')
+    tokens.add('manhattan')
+    tokens.add('ny')
+  }
+
+  // 打分：label 包含 token 越多，越前面
+  const scored = FALLBACK_GEOCODE_PLACES.map(p => {
+    const label = String(p.label || '').toLowerCase()
+    let score = 0
+    for (const t of tokens) {
+      if (t.length >= 2 && label.includes(t)) score += 1
+    }
+    return { p, score }
+  })
+
+  scored.sort((a, b) => b.score - a.score)
+
+  // 如果完全沒 match，就乾脆回全部（避免下拉完全空）
+  const best = scored.filter(x => x.score > 0).map(x => x.p)
+  return best.length ? best : FALLBACK_GEOCODE_PLACES
 }
 
 app.get('/api/geocode', async (req, res) => {
   const query = String(req.query.q || '').trim()
   if (!query) return res.json([])
 
-  const key = query.toLowerCase()
-
-  // ✅ cache hit
-  const cached = geocodeCache.get(key)
-  if (cached && Date.now() - cached.ts < GEOCODE_CACHE_TTL_MS) {
-    return res.json(cached.data)
-  }
-
   try {
-    // ✅ throttle（避免太密集）
-    const now = Date.now()
-    const wait = NOMINATIM_MIN_INTERVAL_MS - (now - lastNominatimAt)
-    if (wait > 0) await sleep(wait)
-    lastNominatimAt = Date.now()
-
     const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(query)}`
 
     const response = await fetch(url, {
       headers: {
-        // 建議換成你自己的聯絡方式
-        'User-Agent': 'ny-taxi-dispatch-demo/1.0 (contact: your_email@example.com)',
+        // 建議用比較像樣的 UA（含專案名 + 聯絡方式）
+        'User-Agent': 'taxi-dispatch-demo/1.0 (contact: vivi39120@gmail.com)',
         'Accept': 'application/json',
-        'Accept-Language': 'en',
-        // 有些環境加 Referer 會更穩
-        'Referer': 'http://localhost',
       },
     })
 
+    // 被擋或非 2xx：直接 fallback
     if (!response.ok) {
-      throw new Error(`Nominatim error: ${response.status}`)
+      console.warn('Nominatim not ok:', response.status)
+      return res.json(fallbackGeocode(query))
     }
 
     const data = await response.json()
-    const results = (Array.isArray(data) ? data : []).map(item => ({
-      label: item.display_name,
-      lat: Number(item.lat),
-      lng: Number(item.lon),
-    }))
 
-    // ✅ cache store
-    geocodeCache.set(key, { ts: Date.now(), data: results })
+    // 2xx 但回空陣列：也要 fallback（你的問題就在這裡）
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.json(fallbackGeocode(query))
+    }
+
+    const results = data
+      .map(item => ({
+        label: item.display_name,
+        lat: Number(item.lat),
+        lng: Number(item.lon),
+      }))
+      .filter(x => x.label && Number.isFinite(x.lat) && Number.isFinite(x.lng))
+
+    // 防止 map/filter 後變空：仍 fallback
+    if (!results.length) {
+      return res.json(fallbackGeocode(query))
+    }
 
     return res.json(results)
   } catch (err) {
-    console.error('Geocode failed, using fallback filtered places:', err)
-
-    // ✅ fallback 也要依 query 過濾，避免你看到永遠同一包
-    const filtered = filterFallbackPlaces(query)
-
-    // cache fallback too（避免每個字都一直噴錯誤）
-    geocodeCache.set(key, { ts: Date.now(), data: filtered })
-
-    return res.json(filtered)
+    console.error('Geocode failed, using fallback:', err)
+    return res.json(fallbackGeocode(query))
   }
 })
 
-
-// =================== 司機登入 / 位置 ===================
-app.post('/api/driver-login', (req, res) => {
-  const { name, carType } = req.body
-  if (!name) return res.status(400).json({ error: 'name is required' })
-
-  const carTypeUpper = carType ? normalizeType(carType) : null
-
-  let driver = drivers.find(d => d.name === name)
-  if (!driver) {
-    driver = {
-      id: nextDriverId++,
-      name,
-      lat: null,
-      lng: null,
-      status: 'idle',
-      carType: carTypeUpper,
-    }
-    drivers.push(driver)
-  } else {
-    if (carTypeUpper && !driver.carType) driver.carType = carTypeUpper
-  }
-
-  res.json(driver)
-})
-
-app.get('/api/drivers', (req, res) => {
-  res.json(drivers)
-})
-
-app.patch('/api/drivers/:id/location', (req, res) => {
-  const id = Number(req.params.id)
-  const { lat, lng, status } = req.body
-
-  const driver = drivers.find(d => d.id === id)
-  if (!driver) return res.status(404).json({ error: 'driver not found' })
-
-  const nLat = toNum(lat)
-  const nLng = toNum(lng)
-  if (nLat != null) driver.lat = nLat
-  if (nLng != null) driver.lng = nLng
-  if (typeof status === 'string') driver.status = status
-
-  res.json(driver)
-})
 
 // =================== 訂單 API ===================
 app.post('/api/orders', (req, res) => {
