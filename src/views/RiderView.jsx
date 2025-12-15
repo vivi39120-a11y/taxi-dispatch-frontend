@@ -32,7 +32,6 @@ export default function RiderView({
   onDraftChange,
   onOpenAuth,
 
-  // ✅ App-level completion hook
   onOrderCompleted,
 }) {
   const didInitDraft = useRef(false)
@@ -61,14 +60,35 @@ export default function RiderView({
   const [resolvedStops, setResolvedStops] = useState([])
 
   const [selectedOrderId, setSelectedOrderId] = useState(null)
+
+  // ✅ 只有「真的完成」才會進這個 set
   const [completedOrderIds, setCompletedOrderIds] = useState(() => new Set())
-  const [completeToast, setCompleteToast] = useState('')
+
+  const [toast, setToast] = useState('')
+  const toastTimerRef = useRef(null)
+
   const userManuallySelectedOrder = useRef(false)
 
   const [composerLocked, setComposerLocked] = useState(false)
   const [composeMode, setComposeMode] = useState(false)
 
   const stopControllersRef = useRef({})
+
+  useEffect(() => {
+    return () => {
+      try {
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+      } catch {}
+    }
+  }, [])
+
+  const showToast = (msg, ms = 2800) => {
+    try {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    } catch {}
+    setToast(msg)
+    toastTimerRef.current = setTimeout(() => setToast(''), ms)
+  }
 
   const resetFarePanel = () => {
     setFareOptions(null)
@@ -173,38 +193,28 @@ export default function RiderView({
     return Array.isArray(ordersWithLocations) ? ordersWithLocations : []
   }, [ordersWithLocations])
 
+  // ✅ 預設選單：優先選「未完成」最新一張
   const defaultOrder = useMemo(() => {
     if (!passengerOrdersWithLocAll.length) return null
+    const isDone = o => completedOrderIds?.has?.(o?.id)
 
-    const ACTIVE = new Set([
-      'pending',
-      'assigned',
-      'accepted',
-      'en_route',
-      'enroute',
-      'picked_up',
-      'in_progress',
-      'on_trip',
-      'ongoing',
-    ])
-
-    const actives = passengerOrdersWithLocAll
-      .filter(o => ACTIVE.has(String(o.status || '').toLowerCase()))
+    const notDone = passengerOrdersWithLocAll
+      .filter(o => !isDone(o))
       .sort(
         (a, b) =>
           (Date.parse(b.updatedAt || b.createdAt || 0) || b.id) -
           (Date.parse(a.updatedAt || a.createdAt || 0) || a.id)
       )
 
-    if (actives[0]) return actives[0]
+    if (notDone[0]) return notDone[0]
 
     const sorted = [...passengerOrdersWithLocAll].sort(
       (a, b) =>
         (Date.parse(b.updatedAt || b.createdAt || 0) || b.id) -
         (Date.parse(a.updatedAt || a.createdAt || 0) || a.id)
     )
-    return sorted[0]
-  }, [passengerOrdersWithLocAll])
+    return sorted[0] || null
+  }, [passengerOrdersWithLocAll, completedOrderIds])
 
   useEffect(() => {
     if (userManuallySelectedOrder.current) return
@@ -569,14 +579,20 @@ export default function RiderView({
     resetComposerInputs()
   }
 
+  // ✅ 到上車點：只提示，不算完成
   const handleOrderArrived = orderId => {
+    showToast('司機已抵達上車點', 2500)
+  }
+
+  // ✅ 到終點：才算完成（加入 completedOrderIds + 回寫 App）
+  const handleOrderCompletedLocal = orderId => {
     setCompletedOrderIds(prev => {
       const next = new Set(prev)
       next.add(orderId)
       return next
     })
-    setCompleteToast('訂單已完成，感謝您的搭乘~')
-    setTimeout(() => setCompleteToast(''), 3500)
+    showToast('訂單已完成，感謝您的搭乘~', 3500)
+    onOrderCompleted?.(orderId)
   }
 
   const ordersForMap = useMemo(() => {
@@ -609,7 +625,7 @@ export default function RiderView({
           simulateVehicles={simulateVehicles}
           completedOrderIds={completedOrderIds}
           onOrderArrived={handleOrderArrived}
-          onOrderCompleted={onOrderCompleted} // ✅ 回寫 completed（司機端也會同步）
+          onOrderCompleted={handleOrderCompletedLocal}
           previewEnabled={shouldShowPreview}
           previewWaypoints={previewWaypoints}
           previewMarkers={previewMarkers}
@@ -620,9 +636,9 @@ export default function RiderView({
         <div className="panel-inner">
           <h1 className="panel-title">{t(lang, 'passengerMode')}</h1>
 
-          {completeToast && (
+          {toast && (
             <div className="auth-hint" style={{ marginTop: 8, color: '#00e676', fontWeight: 700 }}>
-              {completeToast}
+              {toast}
             </div>
           )}
 
@@ -678,7 +694,6 @@ export default function RiderView({
                           setComposeMode(true)
                           handleSelectPickup(item)
                         }}
-                        style={{ color: '#111' }}
                       >
                         {item.label}
                       </button>
@@ -727,7 +742,6 @@ export default function RiderView({
                               setComposeMode(true)
                               handleSelectStopSuggestion(index, item)
                             }}
-                            style={{ color: '#111' }}
                           >
                             {item.label}
                           </button>
@@ -781,7 +795,6 @@ export default function RiderView({
                           setComposeMode(true)
                           handleSelectDropoff(item)
                         }}
-                        style={{ color: '#111' }}
                       >
                         {item.label}
                       </button>
@@ -867,4 +880,4 @@ export default function RiderView({
       </aside>
     </section>
   )
-}  
+}
