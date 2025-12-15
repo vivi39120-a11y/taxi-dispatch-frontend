@@ -35,6 +35,8 @@ export default function OrderList({
   orders,
   drivers,
   isDriverView,
+  currentDriverId,     // ✅ 新增：司機 ID（DriverView 會傳）
+  onAcceptOrder,       // ✅ 新增：接單 callback（DriverView 會傳）
   selectedOrderId,
   completedOrderIds,
   onSelectOrder,
@@ -53,7 +55,9 @@ export default function OrderList({
     <div className="order-groups">
       <div className="order-group">
         <div className="order-group-header">
-          <div className="order-group-title">{t(lang, isDriverView ? 'ordersTitleDriver' : 'ordersTitlePassenger')}</div>
+          <div className="order-group-title">
+            {t(lang, isDriverView ? 'ordersTitleDriver' : 'ordersTitlePassenger')}
+          </div>
           <div className="order-group-sub">{list.length} 筆</div>
         </div>
 
@@ -72,9 +76,32 @@ export default function OrderList({
             const dropoff = o?.dropoff ?? o?.dropoffText ?? o?.dropoff_label ?? '-'
 
             const driverId = o?.driverId ?? o?.assignedDriverId ?? o?.driver_id
-            const driverName = driverId != null ? (driverMap.get(driverId)?.name || driverMap.get(driverId)?.username || '') : ''
+            const driverName =
+              driverId != null
+                ? (driverMap.get(driverId)?.name || driverMap.get(driverId)?.username || '')
+                : ''
 
-            const cardCls = ['order-card', isSelected ? 'selected' : '', done ? 'completed' : ''].filter(Boolean).join(' ')
+            const cardCls = ['order-card', isSelected ? 'selected' : '', done ? 'completed' : '']
+              .filter(Boolean)
+              .join(' ')
+
+            // ✅ 司機端：pending + 未指派司機 + 有接單函式 => 顯示「接單」
+            const canAccept =
+              Boolean(isDriverView) &&
+              !done &&
+              statusKey === 'pending' &&
+              (driverId == null) &&
+              typeof onAcceptOrder === 'function'
+
+            const acceptDisabled = !currentDriverId || id == null
+
+            const onAccept = e => {
+              e.preventDefault()
+              e.stopPropagation()
+              if (acceptDisabled) return
+              // 多傳 driverId 不會傷到既有函式（多餘參數會被忽略）
+              onAcceptOrder(id, currentDriverId)
+            }
 
             return (
               <button
@@ -84,7 +111,25 @@ export default function OrderList({
                 onClick={() => id != null && onSelectOrder?.(id)}
               >
                 <div className="order-card-top">
-                  <span className={`badge ${statusKey}`}>{statusLabel(lang, statusKey)}</span>
+                  {canAccept ? (
+                    <span
+                      className={`badge pending ${acceptDisabled ? 'disabled' : ''}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-disabled={acceptDisabled}
+                      onClick={onAccept}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') onAccept(e)
+                      }}
+                      title={acceptDisabled ? '請先登入/選擇司機' : '接單'}
+                      style={{ cursor: acceptDisabled ? 'not-allowed' : 'pointer' }}
+                    >
+                      接單
+                    </span>
+                  ) : (
+                    <span className={`badge ${statusKey}`}>{statusLabel(lang, statusKey)}</span>
+                  )}
+
                   <span className="order-id">#{id ?? '-'}</span>
                 </div>
 
@@ -102,14 +147,20 @@ export default function OrderList({
                 <div className="order-footer">
                   <div className="dim">司機：{driverName || driverId || '—'}</div>
                   <div className="dim">車種：{o?.vehicleType || '—'}</div>
-                  <div className="dim">距離：{typeof o?.distanceKm === 'number' ? `${o.distanceKm.toFixed(1)} km` : '—'}</div>
+                  <div className="dim">
+                    距離：{typeof o?.distanceKm === 'number' ? `${o.distanceKm.toFixed(1)} km` : '—'}
+                  </div>
                   <div className="dim">時間：{o?.updatedAt || o?.createdAt || '—'}</div>
                 </div>
               </button>
             )
           })}
 
-          {!list.length && <div className="auth-hint" style={{ opacity: 0.8, padding: '10px 2px' }}>目前沒有訂單</div>}
+          {!list.length && (
+            <div className="auth-hint" style={{ opacity: 0.8, padding: '10px 2px' }}>
+              目前沒有訂單
+            </div>
+          )}
         </div>
       </div>
     </div>
