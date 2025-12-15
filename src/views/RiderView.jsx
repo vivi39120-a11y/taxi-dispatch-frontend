@@ -1,4 +1,3 @@
-
 // src/views/RiderView.jsx
 import { useEffect, useMemo, useRef, useState } from 'react'
 import MapView from '../components/MapView.jsx'
@@ -868,4 +867,4 @@ export default function RiderView({
       </aside>
     </section>
   )
-} 
+}  
