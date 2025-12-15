@@ -367,13 +367,13 @@ export default function DriverView({
                         borderRadius: 12,
                         padding: 12,
                         opacity: 0.7,
-                        background: 'rgba(0,0,0,0.25)',
+                        background: 'rgba(0, 0, 0, 0.25)',
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                         <div style={{ fontWeight: 800 }}>
                           訂單 #{o.id}{' '}
-                          <span style={{ color: '#ff5252', marginLeft: 8, fontWeight: 900 }}>已完成</span>
+                          <span style={{ color: 'rgba(2, 156, 69, 0.25)', marginLeft: 8, fontWeight: 900 }}>已完成</span>
                         </div>
                         <div style={{ fontSize: 12, opacity: 0.85 }}>
                           {o.completedAt ? new Date(o.completedAt).toLocaleString() : ''}
@@ -390,7 +390,7 @@ export default function DriverView({
                           </div>
                         )}
                         <div>
-                          距離：{typeof o.distanceKm === 'number' ? `${o.distanceKm} km` : '-'}，已完成共：
+                          距離：{typeof o.distanceKm === 'number' ? `${o.distanceKm} km` : '-'}，已完成：
                           {price != null ? ` $${price.toFixed(2)}` : ' -'}
                         </div>
                       </div>
