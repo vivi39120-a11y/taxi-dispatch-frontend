@@ -291,7 +291,9 @@ export default function RiderView({
     const controller = new AbortController()
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/geocode?q=${encodeURIComponent(pickupText.trim())}`, { signal: controller.signal })
+        const res = await fetch(`/api/geocode?q=${encodeURIComponent(pickupText.trim())}`, {
+          signal: controller.signal,
+        })
         if (!res.ok) return
         const data = normalizeGeocodeList(await res.json().catch(() => []))
         setPickupSuggestions(data)
@@ -319,7 +321,9 @@ export default function RiderView({
     const controller = new AbortController()
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/geocode?q=${encodeURIComponent(dropoffText.trim())}`, { signal: controller.signal })
+        const res = await fetch(`/api/geocode?q=${encodeURIComponent(dropoffText.trim())}`, {
+          signal: controller.signal,
+        })
         if (!res.ok) return
         const data = normalizeGeocodeList(await res.json().catch(() => []))
         setDropoffSuggestions(data)
@@ -569,22 +573,24 @@ export default function RiderView({
     resetComposerInputs()
   }
 
- const handleOrderArrived = orderId => {
-  // 到達 ≠ 完成：只顯示提示，不把訂單視為歷史完成
-  setCompleteToast('司機已抵達上車點')
-  setTimeout(() => setCompleteToast(''), 2500)
-  // 只有「真的跑完整段行程」才算完成：加入 completedSet，並同步回 App
-  setCompletedOrderIds(prev => {
-    const next = new Set(prev)
-    next.add(orderId)
-    return next
-  })
-  setCompleteToast('訂單已完成，感謝您的搭乘~')
-  setTimeout(() => setCompleteToast(''), 3500)
+  // ✅ 到達（例如到上車點）只提示，不算完成
+  const handleOrderArrived = orderId => {
+    setCompleteToast('司機已抵達上車點')
+    setTimeout(() => setCompleteToast(''), 2500)
+  }
 
-  onOrderCompleted?.(orderId)
-}
+  // ✅ 真的完成（跑完整段）才加入 completed 並同步回 App
+  const handleOrderCompletedLocal = orderId => {
+    setCompletedOrderIds(prev => {
+      const next = new Set(prev)
+      next.add(orderId)
+      return next
+    })
+    setCompleteToast('訂單已完成，感謝您的搭乘~')
+    setTimeout(() => setCompleteToast(''), 3500)
 
+    onOrderCompleted?.(orderId)
+  }
 
   const ordersForMap = useMemo(() => {
     if (composeMode) return []
@@ -685,7 +691,6 @@ export default function RiderView({
                           setComposeMode(true)
                           handleSelectPickup(item)
                         }}
-                        style={{ color: '#111' }}
                       >
                         {item.label}
                       </button>
@@ -734,7 +739,6 @@ export default function RiderView({
                               setComposeMode(true)
                               handleSelectStopSuggestion(index, item)
                             }}
-                            style={{ color: '#111' }}
                           >
                             {item.label}
                           </button>
@@ -788,7 +792,6 @@ export default function RiderView({
                           setComposeMode(true)
                           handleSelectDropoff(item)
                         }}
-                        style={{ color: '#111' }}
                       >
                         {item.label}
                       </button>
