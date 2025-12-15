@@ -569,15 +569,22 @@ export default function RiderView({
     resetComposerInputs()
   }
 
-  const handleOrderArrived = orderId => {
-    setCompletedOrderIds(prev => {
-      const next = new Set(prev)
-      next.add(orderId)
-      return next
-    })
-    setCompleteToast('訂單已完成，感謝您的搭乘~')
-    setTimeout(() => setCompleteToast(''), 3500)
-  }
+ const handleOrderArrived = orderId => {
+  // 到達 ≠ 完成：只顯示提示，不把訂單視為歷史完成
+  setCompleteToast('司機已抵達上車點')
+  setTimeout(() => setCompleteToast(''), 2500)
+  // 只有「真的跑完整段行程」才算完成：加入 completedSet，並同步回 App
+  setCompletedOrderIds(prev => {
+    const next = new Set(prev)
+    next.add(orderId)
+    return next
+  })
+  setCompleteToast('訂單已完成，感謝您的搭乘~')
+  setTimeout(() => setCompleteToast(''), 3500)
+
+  onOrderCompleted?.(orderId)
+}
+
 
   const ordersForMap = useMemo(() => {
     if (composeMode) return []
@@ -609,7 +616,7 @@ export default function RiderView({
           simulateVehicles={simulateVehicles}
           completedOrderIds={completedOrderIds}
           onOrderArrived={handleOrderArrived}
-          onOrderCompleted={onOrderCompleted} // ✅ 回寫 completed（司機端也會同步）
+          onOrderCompleted={handleOrderCompletedLocal}
           previewEnabled={shouldShowPreview}
           previewWaypoints={previewWaypoints}
           previewMarkers={previewMarkers}
