@@ -1,11 +1,10 @@
-// src/components/MapView.jsx
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMapEvents } from 'react-leaflet'
 import { useMemo, useEffect, useRef, useState } from 'react'
 import { taxiIcon, passengerIcon, dropoffIcon, createStopIcon } from '../mapIcons'
 import { t } from '../i18n'
 
 const DEFAULT_CENTER = [40.758, -73.9855] // Times Square
-const STEP_MS = 120 // 兩端同步用的步進時間
+const STEP_MS = 120
 const ORDER_START_PREFIX = 'orderStart:' // 每筆訂單固定的司機起點（只寫一次）
 
 const ACTIVE_STATUS_SET = new Set([
@@ -30,10 +29,19 @@ function isActiveStatus(status) {
   return ACTIVE_STATUS_SET.has(s)
 }
 
-// ====== orderStart: 固定每張訂單的司機起點（避免中途跳回重跑）=====
-function readOrderStart(orderId) {
+// ✅ 用 order.id + createdAt 做唯一 key，避免 server 重啟後 id 重用污染 localStorage
+function getOrderKey(order) {
+  const id = Number(order?.id)
+  if (!Number.isFinite(id)) return null
+  const createdAt = order?.createdAt || order?.created_at || order?.updatedAt || order?.updated_at || ''
+  return `${id}::${String(createdAt)}`
+}
+
+// ====== orderStart: 固定每張訂單的司機起點 ======
+function readOrderStart(orderKey) {
   try {
-    const raw = localStorage.getItem(`${ORDER_START_PREFIX}${orderId}`)
+    if (!orderKey) return null
+    const raw = localStorage.getItem(`${ORDER_START_PREFIX}${orderKey}`)
     if (!raw) return null
     const obj = JSON.parse(raw)
     const lat = Number(obj?.lat)
@@ -45,18 +53,19 @@ function readOrderStart(orderId) {
   }
 }
 
-function writeOrderStartOnce(orderId, latlng) {
-  if (orderId == null || !latlng) return
+function writeOrderStartOnce(orderKey, latlng) {
+  if (!orderKey || !latlng) return
   try {
-    const k = `${ORDER_START_PREFIX}${orderId}`
-    if (localStorage.getItem(k)) return // ✅ 只寫一次
+    const k = `${ORDER_START_PREFIX}${orderKey}`
+    if (localStorage.getItem(k)) return
     localStorage.setItem(k, JSON.stringify({ lat: latlng.lat, lng: latlng.lng }))
   } catch {}
 }
 
-function clearOrderStart(orderId) {
+function clearOrderStart(orderKey) {
   try {
-    localStorage.removeItem(`${ORDER_START_PREFIX}${orderId}`)
+    if (!orderKey) return
+    localStorage.removeItem(`${ORDER_START_PREFIX}${orderKey}`)
   } catch {}
 }
 
@@ -115,7 +124,7 @@ function routeKey(points) {
   return points.map(p => `${Number(p.lat).toFixed(5)},${Number(p.lng).toFixed(5)}`).join('|')
 }
 
-// passenger polyline 切段用：找到最接近 pickup 的 index
+// 找最接近 target 的 index
 function nearestIndexToPoint(coords, target) {
   if (!Array.isArray(coords) || !coords.length || !target) return 0
   const tLat = Number(target.lat)
@@ -137,8 +146,7 @@ function nearestIndexToPoint(coords, target) {
   return bestIdx
 }
 
-// ✅ 訂單 waypoints：兩端用同一條「車行路線」
-// 核心：司機起點用 orderStart 固定，不跟著 driver.lat/lng polling 改變
+// ✅ 訂單 waypoints：司機起點用 orderStart 固定（且以 orderKey 隔離）
 function buildCarWaypoints(order, mode, drivers, currentDriverId) {
   const pickup = order.pickupLocation
   const dropoff = order.dropoffLocation
@@ -147,6 +155,7 @@ function buildCarWaypoints(order, mode, drivers, currentDriverId) {
 
   const active = isActiveStatus(order.status)
   const driverId = order.driverId
+  const orderKey = getOrderKey(order)
 
   const visibleToThisView =
     mode === 'passenger' ||
@@ -154,9 +163,9 @@ function buildCarWaypoints(order, mode, drivers, currentDriverId) {
 
   const waypoints = []
 
-  // 司機起點：優先 orderStart（固定），沒有才用 drivers / localStorage driverLoc 並寫入一次
-  if (active && visibleToThisView && driverId != null) {
-    let fixedStart = readOrderStart(order.id)
+  // 司機起點（只有 active 且本視角可見 且已指派司機才需要）
+  if (active && visibleToThisView && driverId != null && orderKey) {
+    let fixedStart = readOrderStart(orderKey)
 
     if (!fixedStart) {
       const d = drivers.find(x => sameId(x.id, driverId))
@@ -167,14 +176,12 @@ function buildCarWaypoints(order, mode, drivers, currentDriverId) {
       const start = fromDrivers || fromLocal
 
       if (start) {
-        writeOrderStartOnce(order.id, start)
+        writeOrderStartOnce(orderKey, start)
         fixedStart = start
       }
     }
 
-    if (fixedStart) {
-      waypoints.push(fixedStart)
-    }
+    if (fixedStart) waypoints.push(fixedStart)
   }
 
   waypoints.push({ lat: pickup.lat, lng: pickup.lng })
@@ -190,14 +197,15 @@ function buildCarWaypoints(order, mode, drivers, currentDriverId) {
   return waypoints.length >= 2 ? waypoints : null
 }
 
-// ====== 模擬狀態：跨分頁同步（避免切頁重跑/兩端不同步）=====
-function simKey(orderId) {
-  return `sim:${orderId}`
+// ====== 模擬狀態：跨分頁同步（以 orderKey 隔離）=====
+function simKey(orderKey) {
+  return `sim:${orderKey}`
 }
 
-function readSim(orderId) {
+function readSim(orderKey) {
   try {
-    const raw = localStorage.getItem(simKey(orderId))
+    if (!orderKey) return null
+    const raw = localStorage.getItem(simKey(orderKey))
     if (!raw) return null
     const obj = JSON.parse(raw)
     if (!obj || typeof obj !== 'object') return null
@@ -207,57 +215,52 @@ function readSim(orderId) {
   }
 }
 
-function writeSim(orderId, obj) {
+function writeSim(orderKey, obj) {
   try {
-    localStorage.setItem(simKey(orderId), JSON.stringify(obj))
+    if (!orderKey) return
+    localStorage.setItem(simKey(orderKey), JSON.stringify(obj))
   } catch {}
 }
 
-function ensureSim(orderId) {
+function ensureSim(orderKey) {
   const now = Date.now()
-  const cur = readSim(orderId)
+  const cur = readSim(orderKey)
   if (cur) return cur
-  const init = {
-    elapsedMs: 0,
-    startedAt: now,
-    running: true,
-    stepMs: STEP_MS,
-    completed: false,
-  }
-  writeSim(orderId, init)
+  const init = { elapsedMs: 0, startedAt: now, running: true, stepMs: STEP_MS, completed: false }
+  writeSim(orderKey, init)
   return init
 }
 
-function pauseSim(orderId) {
+function pauseSim(orderKey) {
   const now = Date.now()
-  const cur = readSim(orderId)
+  const cur = readSim(orderKey)
   if (!cur || cur.completed) return
   if (!cur.running) return
   const elapsed = Number(cur.elapsedMs) || 0
   const startedAt = Number(cur.startedAt) || now
   const next = { ...cur, elapsedMs: elapsed + Math.max(0, now - startedAt), running: false, startedAt: now }
-  writeSim(orderId, next)
+  writeSim(orderKey, next)
 }
 
-function resumeSim(orderId) {
+function resumeSim(orderKey) {
   const now = Date.now()
-  const cur = readSim(orderId)
+  const cur = readSim(orderKey)
   if (!cur || cur.completed) return
   if (cur.running) return
   const next = { ...cur, running: true, startedAt: now }
-  writeSim(orderId, next)
+  writeSim(orderKey, next)
 }
 
-function completeSim(orderId) {
+function completeSim(orderKey) {
   const now = Date.now()
-  const cur = readSim(orderId) || {}
+  const cur = readSim(orderKey) || {}
   const next = { ...cur, running: false, completed: true, startedAt: now }
-  writeSim(orderId, next)
+  writeSim(orderKey, next)
 }
 
-function computeIndex(orderId) {
+function computeIndex(orderKey) {
   const now = Date.now()
-  const cur = ensureSim(orderId)
+  const cur = ensureSim(orderKey)
   const stepMs = Number(cur.stepMs) || STEP_MS
   const elapsed = Number(cur.elapsedMs) || 0
   const startedAt = Number(cur.startedAt) || now
@@ -296,10 +299,11 @@ export default function MapView({
   const [routesByOrder, setRoutesByOrder] = useState({})
   const [previewRoute, setPreviewRoute] = useState(null)
 
-  // ✅ tick 觸發 re-render（位置由 Date.now + localStorage 推導 → 兩端同步）
   const [tick, setTick] = useState(0)
 
+  // ✅ 分開記：到上車點 once / 到終點 once
   const arrivedOnceRef = useRef(new Set())
+  const completedOnceRef = useRef(new Set())
 
   // 取得「訂單路線」
   useEffect(() => {
@@ -324,19 +328,14 @@ export default function MapView({
           if (!coords || coords.length < 2) return
           osrmCacheRef.current.set(key, coords)
           next[o.id] = coords
-        } catch {
-          // ignore
-        }
+        } catch {}
       })
 
       await Promise.all(tasks)
-
       if (cancelled) return
 
-      // ✅ 不要因為這輪 OSRM 失敗就把舊路線整個清掉（避免閃爍）
       setRoutesByOrder(prev => {
         const merged = { ...prev, ...next }
-        // ✅ 清掉已不存在的訂單路線
         Object.keys(merged).forEach(k => {
           const idNum = Number(k)
           const id = Number.isFinite(idNum) ? idNum : k
@@ -347,19 +346,18 @@ export default function MapView({
     }
 
     loadRoutes()
-
     return () => {
       cancelled = true
       controller.abort()
     }
   }, [orders, drivers, mode, currentDriverId])
 
-  // simulateVehicles 切換：更新 sim 狀態（跨分頁一致）
+  // simulateVehicles 切換：更新 sim 狀態（用 orderKey）
   useEffect(() => {
-    const ids = orders.map(o => o?.id).filter(id => id != null)
-    if (!ids.length) return
-    if (simulateVehicles) ids.forEach(id => resumeSim(id))
-    else ids.forEach(id => pauseSim(id))
+    const keys = orders.map(o => getOrderKey(o)).filter(Boolean)
+    if (!keys.length) return
+    if (simulateVehicles) keys.forEach(k => resumeSim(k))
+    else keys.forEach(k => pauseSim(k))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [simulateVehicles, orders])
 
@@ -392,9 +390,7 @@ export default function MapView({
         if (!coords || coords.length < 2) return
         osrmCacheRef.current.set(key, coords)
         setPreviewRoute(coords)
-      } catch {
-        // ignore
-      }
+      } catch {}
     })()
 
     return () => controller.abort()
@@ -418,7 +414,7 @@ export default function MapView({
     return DEFAULT_CENTER
   }, [previewEnabled, previewMarkers, isDriverMode, myDriver, orders])
 
-  // 司機 marker：只有「沒有進行中路線」時才顯示（避免司機端看到兩台車）
+  // 司機 marker：只有「沒有進行中路線」時才顯示
   const hasAnyActiveRouteForDriver = useMemo(() => {
     if (!isDriverMode) return false
     const o = orders?.[0]
@@ -452,18 +448,16 @@ export default function MapView({
 
       const active = isActiveStatus(o.status)
 
-      // 司機端只顯示自己的單
       const visibleToThisView =
         mode === 'passenger' ||
         (mode === 'driver' && o.driverId != null && currentDriverId != null && sameId(o.driverId, currentDriverId))
 
-      
-     let polyPositions = routeCoords
+      let polyPositions = routeCoords
 
-      // ✅ 乘客端：只有 pending 才不畫「司機→上車點」；一旦接單(active)就畫完整路線
+      // 乘客端：pending 才不畫「司機→上車點」
       if (
         mode === 'passenger' &&
-        !isActiveStatus(o.status) && // pending/未接單
+        !isActiveStatus(o.status) &&
         routeCoords &&
         pickup &&
         typeof pickup.lat === 'number' &&
@@ -479,35 +473,51 @@ export default function MapView({
         ) : null
 
       let carMarker = null
-      if (active && visibleToThisView && routeCoords && routeCoords.length >= 2) {
-        ensureSim(o.id)
 
-        const { idx } = computeIndex(o.id)
-        const clamped = Math.min(idx, routeCoords.length - 1)
-        const [lat, lng] = routeCoords[clamped]
+      // ✅ 車只在 active + 可視 + 有路線 + 已指派司機 才跑
+      if (active && visibleToThisView && routeCoords && routeCoords.length >= 2 && o.driverId != null) {
+        const orderKey = getOrderKey(o)
+        if (orderKey) {
+          ensureSim(orderKey)
 
-        // 完成偵測：到尾端 → 只觸發一次
-        if (clamped >= routeCoords.length - 1) {
-          const alreadyCompleted =
-            (completedOrderIds && completedOrderIds?.has && completedOrderIds.has(o.id)) || arrivedOnceRef.current.has(o.id)
+          const { idx } = computeIndex(orderKey)
+          const clamped = Math.min(idx, routeCoords.length - 1)
+          const [lat, lng] = routeCoords[clamped]
 
-          if (!alreadyCompleted) {
-            arrivedOnceRef.current.add(o.id)
-            completeSim(o.id)
-
-            // ✅ 清掉固定起點，避免測試/重整後污染
-            clearOrderStart(o.id)
-
-            onOrderArrived?.(o.id)
-            onOrderCompleted?.(o.id)
+          // ✅ 到上車點：只觸發一次（用 pickup 最近點 index）
+          if (pickup && typeof pickup.lat === 'number' && typeof pickup.lng === 'number') {
+            const pickupIdx = nearestIndexToPoint(routeCoords, pickup)
+            if (clamped >= pickupIdx) {
+              const arrivedAlready = arrivedOnceRef.current.has(orderKey)
+              if (!arrivedAlready) {
+                arrivedOnceRef.current.add(orderKey)
+                onOrderArrived?.(o.id)
+              }
+            }
           }
-        }
 
-        carMarker = (
-          <Marker key={`car-${o.id}`} position={[lat, lng]} icon={taxiIcon}>
-            <Popup>Order #{o.id}</Popup>
-          </Marker>
-        )
+          // ✅ 到終點：才 completed（只觸發一次）
+          if (clamped >= routeCoords.length - 1) {
+            const doneBySet = Boolean(completedOrderIds?.has?.(o.id))
+            const doneOnce = completedOnceRef.current.has(orderKey)
+
+            if (!doneBySet && !doneOnce) {
+              completedOnceRef.current.add(orderKey)
+              completeSim(orderKey)
+
+              // 清掉固定起點（避免污染）
+              clearOrderStart(orderKey)
+
+              onOrderCompleted?.(o.id)
+            }
+          }
+
+          carMarker = (
+            <Marker key={`car-${o.id}`} position={[lat, lng]} icon={taxiIcon}>
+              <Popup>Order #{o.id}</Popup>
+            </Marker>
+          )
+        }
       }
 
       return (
@@ -546,7 +556,7 @@ export default function MapView({
         </div>
       )
     })
-    // tick 觸發車位置更新（Date.now 驅動）
+    // tick 觸發車位置更新
   }, [orders, routesByOrder, lang, mode, currentDriverId, completedOrderIds, onOrderArrived, onOrderCompleted, tick])
 
   const previewGraphics = useMemo(() => {

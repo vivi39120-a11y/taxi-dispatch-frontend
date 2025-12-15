@@ -90,7 +90,16 @@ function writeGlobalSimRunning(v) {
 }
 
 // ====== 已完成訂單：本機覆蓋（避免 polling 洗回去）=====
-const COMPLETED_META_KEY = 'completedOrdersMeta' // { [orderId]: { completedAtISO } }
+// ✅ V2：用 `${orderId}::${createdAt}` 當 key，避免 server 重啟後 id 重用污染
+const COMPLETED_META_KEY = 'completedOrdersMetaV2' // { [orderKey]: { completedAtISO } }
+
+function makeCompletedKeyFromOrder(o) {
+  const id = Number(o?.id)
+  if (!Number.isFinite(id)) return null
+  const createdAt = o?.createdAt || o?.created_at || o?.updatedAt || o?.updated_at || ''
+  return `${id}::${String(createdAt)}`
+}
+
 function loadCompletedMeta() {
   try {
     const raw = localStorage.getItem(COMPLETED_META_KEY)
@@ -140,6 +149,12 @@ export default function App() {
   const [driverHotspotPosById, setDriverHotspotPosById] = useState({})
 
   const completedMetaRef = useRef(loadCompletedMeta())
+
+  // ✅ 防止 markOrderCompleted 吃到舊 closure
+  const ordersRef = useRef([])
+  useEffect(() => {
+    ordersRef.current = orders
+  }, [orders])
 
   const openAuth = (returnTo = 'landing', targetRole = null) => {
     setAuthReturnTo(returnTo)
@@ -214,16 +229,27 @@ export default function App() {
     })
   }
 
-  // ✅ 完成訂單：本機覆蓋 + 回寫後端
+  // ✅ 完成訂單：本機覆蓋 + 回寫後端（加防呆：未指派/還 pending 不允許完成）
   const markOrderCompleted = async orderId => {
     if (orderId == null) return
     const idNum = Number(orderId)
     if (!Number.isFinite(idNum)) return
 
+    const target = (ordersRef.current || []).find(o => Number(o?.id) === idNum)
+    if (!target) return
+
+    const st = String(target.status || '').toLowerCase().trim()
+    if (target.driverId == null || st === 'pending') {
+      console.warn('markOrderCompleted blocked (unassigned/pending):', target)
+      return
+    }
+
     const nowISO = new Date().toISOString()
+    const orderKey = makeCompletedKeyFromOrder(target)
+    if (!orderKey) return
 
     const meta = { ...(completedMetaRef.current || {}) }
-    if (!meta[idNum]) meta[idNum] = { completedAtISO: nowISO }
+    if (!meta[orderKey]) meta[orderKey] = { completedAtISO: nowISO }
     completedMetaRef.current = meta
     saveCompletedMeta(meta)
 
@@ -274,16 +300,17 @@ export default function App() {
         }
       }
 
+      // ✅ 用 orderKey 套 completed（避免 id 重用污染）
       const meta = completedMetaRef.current || {}
       const mergedOrders = Array.isArray(oDataRaw)
         ? oDataRaw.map(o => {
-            const idNum = Number(o?.id)
-            if (!Number.isFinite(idNum)) return o
-            if (!meta[idNum]) return o
+            const key = makeCompletedKeyFromOrder(o)
+            if (!key) return o
+            if (!meta[key]) return o
             return {
               ...o,
               status: 'completed',
-              completedAt: o.completedAt || meta[idNum]?.completedAtISO || new Date().toISOString(),
+              completedAt: o.completedAt || meta[key]?.completedAtISO || new Date().toISOString(),
             }
           })
         : []
