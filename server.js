@@ -192,6 +192,55 @@ app.get('/api/geocode', async (req, res) => {
   }
 })
 
+// =================== Driver API ===================
+
+// 取得司機列表（前端每 3 秒會打）
+app.get('/api/drivers', (req, res) => {
+  res.json(drivers)
+})
+
+// 司機登入/建立自己的車（前端 login 後會打 /api/driver-login）
+app.post('/api/driver-login', (req, res) => {
+  const { name, carType } = req.body || {}
+  if (!name) return res.status(400).json({ error: 'name is required' })
+
+  const carTypeUpper = carType ? normalizeType(carType) : null
+
+  let driver = drivers.find(d => d.name === name)
+  if (!driver) {
+    driver = {
+      id: nextDriverId++,
+      name,
+      lat: null,
+      lng: null,
+      status: 'idle',
+      carType: carTypeUpper,
+    }
+    drivers.push(driver)
+  } else {
+    // 若同名已存在，允許更新車種（可選）
+    if (carTypeUpper) driver.carType = carTypeUpper
+  }
+
+  res.json(driver)
+})
+
+// 司機更新定位（如果你 MapView 有回寫定位到後端就會用到）
+app.patch('/api/drivers/:id/location', (req, res) => {
+  const id = Number(req.params.id)
+  const driver = drivers.find(d => d.id === id)
+  if (!driver) return res.status(404).json({ error: 'driver not found' })
+
+  const lat = toNum(req.body?.lat)
+  const lng = toNum(req.body?.lng)
+  if (lat != null) driver.lat = lat
+  if (lng != null) driver.lng = lng
+
+  // 可選：允許改狀態
+  if (typeof req.body?.status === 'string') driver.status = req.body.status.trim()
+
+  res.json(driver)
+})
 
 // =================== 訂單 API ===================
 app.post('/api/orders', (req, res) => {
