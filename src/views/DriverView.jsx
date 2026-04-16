@@ -1,24 +1,21 @@
-// src/views/DriverView.jsx
-import { useEffect, useMemo, useRef, useState } from 'react'
+//driver
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import MapView from '../components/MapView.jsx'
 import OrderList from '../components/OrderList.jsx'
 import { t } from '../i18n'
+import { apiFetch } from '../apiBase.js'
 
-// ✅ 把任何來源的車種字串統一成：YELLOW / GREEN / FHV
+// --- 工具函數 ---
 function normalizeVehicleType(value) {
   if (value == null) return null
   const s = String(value).trim().toUpperCase()
   if (!s) return null
-
   if (s === 'YELLOW' || s.includes('YELLOW')) return 'YELLOW'
   if (s === 'GREEN' || s.includes('GREEN')) return 'GREEN'
   if (s === 'FHV' || s.includes('FHV')) return 'FHV'
-
-  // 中文保底
   if (s.includes('黃')) return 'YELLOW'
   if (s.includes('綠')) return 'GREEN'
   if (s.includes('多元')) return 'FHV'
-
   return null
 }
 
@@ -36,6 +33,10 @@ function normStatus(status) {
   return String(status || '').trim().toLowerCase()
 }
 
+function getAnyDriverId(o) {
+  return o?.driverId ?? o?.assignedDriverId ?? o?.driver_id ?? null
+}
+
 function getPickupLoc(o) {
   const p = o?.pickupLocation
   if (p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng))) {
@@ -47,41 +48,122 @@ function getPickupLoc(o) {
   return null
 }
 
-function getDropoffLoc(o) {
-  const d = o?.dropoffLocation
-  if (d && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lng))) {
-    return { lat: Number(d.lat), lng: Number(d.lng) }
-  }
-  const lat = Number(o?.dropoffLat)
-  const lng = Number(o?.dropoffLng)
-  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng }
-  return null
+function makeOrderKey(o) {
+  const id = Number(o?.id)
+  if (!Number.isFinite(id)) return null
+  const createdAt = o?.createdAt || o?.created_at || o?.updatedAt || o?.updated_at || ''
+  return `${id}::${String(createdAt)}`
 }
 
-// 呼叫 OSRM 取得「司機 → 上車點」的道路距離 (km)
 async function osrmDistanceKm(from, to) {
-  const url =
-    `https://router.project-osrm.org/route/v1/driving/` +
-    `${from.lng},${from.lat};${to.lng},${to.lat}` +
-    `?overview=false`
-
+  const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`
   const res = await fetch(url)
   if (!res.ok) throw new Error('OSRM error')
-
   const data = await res.json()
   if (!data.routes || !data.routes.length) throw new Error('OSRM no route')
   return data.routes[0].distance / 1000
 }
 
+function round6(x) {
+  const n = Number(x)
+  if (!Number.isFinite(n)) return null
+  return Math.round(n * 1e6) / 1e6
+}
+
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length)
+  let idx = 0
+
+  async function worker() {
+    while (idx < items.length) {
+      const cur = idx++
+      results[cur] = await fn(items[cur], cur)
+    }
+  }
+
+  const workers = Array.from({ length: Math.max(1, limit) }, () => worker())
+  await Promise.all(workers)
+  return results
+}
+
+// ✅ 每位司機獨立的定位鎖
+function driverLocLockKey(driverId) {
+  return `driverLocConfirmed:${driverId ?? 'na'}`
+}
+function readLocConfirmed(driverId) {
+  try {
+    if (driverId == null) return false
+    return localStorage.getItem(driverLocLockKey(driverId)) === '1'
+  } catch {
+    return false
+  }
+}
+function writeLocConfirmed(driverId, val) {
+  try {
+    if (driverId == null) return
+    localStorage.setItem(driverLocLockKey(driverId), val ? '1' : '0')
+  } catch {}
+}
+
+function readPersistedDriverLoc(driverId) {
+  try {
+    if (driverId == null) return null
+    const raw = localStorage.getItem(`driverLoc:${driverId}`)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    const lat = Number(parsed?.lat)
+    const lng = Number(parsed?.lng)
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng }
+    return null
+  } catch {
+    return null
+  }
+}
+
+const DRIVER_LOC_TS_PREFIX = 'driverLocTs:'
+const DRIVER_LAST_LOGIN_DRIVER_KEY = 'driverLastLoginDriverId'
+const DRIVER_LOC_TTL_MS = 60 * 60 * 1000 // 1小時；你要 12 小時就改成 12 * 60 * 60 * 1000
+
+function driverLocTsKey(driverId) {
+  return `${DRIVER_LOC_TS_PREFIX}${driverId ?? 'na'}`
+}
+
+function readLocTimestamp(driverId) {
+  try {
+    if (driverId == null) return null
+    const raw = localStorage.getItem(driverLocTsKey(driverId))
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : null
+  } catch {
+    return null
+  }
+}
+
+function writeLocTimestamp(driverId, ts = Date.now()) {
+  try {
+    if (driverId == null) return
+    localStorage.setItem(driverLocTsKey(driverId), String(ts))
+  } catch {}
+}
+
+function clearDriverLocationState(driverId) {
+  try {
+    if (driverId == null) return
+    localStorage.removeItem(`driverLoc:${driverId}`)
+    localStorage.removeItem(driverLocLockKey(driverId))
+    localStorage.removeItem(driverLocTsKey(driverId))
+  } catch {}
+}
+
 export default function DriverView({
   lang,
-  drivers,
+  drivers = [],
   orders,
   ordersWithLocations,
   loading,
   error,
   currentDriverId,
-  setCurrentDriverId, // 保留
+  setCurrentDriverId,
   acceptOrder,
   refresh,
   currentUser,
@@ -89,24 +171,26 @@ export default function DriverView({
   simulateVehicles,
   onOpenAuth,
   onOrderCompleted,
+  onCarPosChange,
+  hotspots = [],
+  showHotspots = true,
 }) {
   const goAuth = () => {
     if (onOpenAuth) {
       onOpenAuth('driver', 'driver')
       return
     }
-    const base = window.location.pathname
-    window.location.href = `${base}?auth=1&role=driver`
+    window.location.href = `${window.location.pathname}?auth=1&role=driver`
   }
 
-  // ✅ 一律以「完整資料」優先
-  const allOrders = useMemo(() => {
-    if (Array.isArray(ordersWithLocations) && ordersWithLocations.length) return ordersWithLocations
-    if (Array.isArray(orders) && orders.length) return orders
-    return []
+  const isLoggedIn = Boolean(currentUser?.username)
+
+  const allOrdersFromProps = useMemo(() => {
+    return Array.isArray(ordersWithLocations) && ordersWithLocations.length
+      ? ordersWithLocations
+      : orders || []
   }, [ordersWithLocations, orders])
 
-  // ✅ 找出目前司機：先用 id；找不到就用 username/name fallback
   const myDriver = useMemo(() => {
     if (currentDriverId != null) {
       const byId = drivers.find(d => sameId(d?.id, currentDriverId))
@@ -114,201 +198,366 @@ export default function DriverView({
     }
     const u = currentUser?.username
     if (u) {
-      const byName = drivers.find(d => String(d?.name || d?.username || '').trim() === String(u).trim())
+      const byName = drivers.find(
+        d => String(d?.name || d?.username || '').trim() === String(u).trim()
+      )
       if (byName) return byName
     }
     return null
   }, [drivers, currentDriverId, currentUser])
 
-  // ✅ 真正應該用的 driverId（避免錯位）
-  const effectiveDriverId = myDriver?.id ?? currentDriverId ?? null
+  const effectiveDriverId = isLoggedIn
+    ? (myDriver?.id ?? null)
+    : (currentDriverId ?? null)
 
-  // ✅ 自動校正 currentDriverId（只要偵測到不一致就修回 driver.id）
+  const driverReady = !isLoggedIn || (myDriver && effectiveDriverId != null)
+
   useEffect(() => {
-    if (!setCurrentDriverId) return
-    if (myDriver?.id == null) return
-    if (currentDriverId == null) return
-    if (!sameId(currentDriverId, myDriver.id)) setCurrentDriverId(myDriver.id)
+    if (!setCurrentDriverId || myDriver?.id == null) return
+    if (currentDriverId == null || !sameId(currentDriverId, myDriver.id)) {
+      setCurrentDriverId(myDriver.id)
+    }
   }, [myDriver, currentDriverId, setCurrentDriverId])
 
   const myCarType = normalizeVehicleType(myDriver?.carType ?? currentUser?.carType ?? null)
 
+  const [locConfirmed, setLocConfirmed] = useState(false)
+
+  useEffect(() => {
+  if (!isLoggedIn || effectiveDriverId == null) {
+    setLocConfirmed(false)
+    return
+  }
+
+  const now = Date.now()
+  const lastLoginDriverId = localStorage.getItem(DRIVER_LAST_LOGIN_DRIVER_KEY)
+  const currentDriverIdStr = String(effectiveDriverId)
+
+  const isDifferentDriver =
+    lastLoginDriverId != null && lastLoginDriverId !== currentDriverIdStr
+
+  const ts = readLocTimestamp(effectiveDriverId)
+  const isExpired = !ts || (now - ts > DRIVER_LOC_TTL_MS)
+
+  if (isDifferentDriver) {
+    clearDriverLocationState(effectiveDriverId)
+    setLocConfirmed(false)
+  } else if (isExpired) {
+    clearDriverLocationState(effectiveDriverId)
+    setLocConfirmed(false)
+  } else {
+    setLocConfirmed(readLocConfirmed(effectiveDriverId))
+  }
+
+  localStorage.setItem(DRIVER_LAST_LOGIN_DRIVER_KEY, currentDriverIdStr)
+}, [effectiveDriverId, isLoggedIn])
+
+  const [selectedOrderId, setSelectedOrderId] = useState(null)
   const [orderDistances, setOrderDistances] = useState({})
   const [completedNotice, setCompletedNotice] = useState('')
   const completedSeenRef = useRef(new Set())
 
-  // ====== 1) 地圖只畫「屬於自己」且「進行中」最新 1 張 ======
+  useEffect(() => {
+    setSelectedOrderId(null)
+  }, [effectiveDriverId, isLoggedIn])
+
+  // ✅ 修正：
+  // 第一次點地圖定位才需要上鎖
+  // 之後完成訂單 / 行程同步更新位置，不能被 locConfirmed 擋掉
+  const handleDriverLocationChange = useCallback(
+    p => {
+      if (!driverReady) return
+      if (!p || effectiveDriverId == null) return
+      if (!sameId(p.id, effectiveDriverId)) return
+
+      if (!locConfirmed) {
+  setLocConfirmed(true)
+  writeLocConfirmed(effectiveDriverId, true)
+}
+
+writeLocTimestamp(effectiveDriverId, Date.now())
+onDriverLocationChange?.(p)
+    },
+    [onDriverLocationChange, effectiveDriverId, locConfirmed, driverReady]
+  )
+
+  // ✅ 新增：重設定位（不影響原流程，純 debug / UX）
+  const resetMyLocation = useCallback(() => {
+  if (effectiveDriverId == null) return
+  clearDriverLocationState(effectiveDriverId)
+  setLocConfirmed(false)
+}, [effectiveDriverId])
+
+  // ✅ 修正：
+  // 每次顯示司機位置優先吃 localStorage 的最新 driverLoc
+  // 這樣完成訂單後的新終點就會直接成為下一次起點
+  const myDriverLoc = useMemo(() => {
+    if (!locConfirmed || effectiveDriverId == null) return null
+
+    const persisted = readPersistedDriverLoc(effectiveDriverId)
+    if (persisted) return persisted
+
+    if (!myDriver) return null
+
+    const lat = Number(myDriver.lat)
+    const lng = Number(myDriver.lng)
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { lat, lng }
+    }
+
+    return null
+  }, [myDriver, locConfirmed, effectiveDriverId])
+
+  const visibleDrivers = useMemo(() => {
+    if (!driverReady || !locConfirmed || !myDriverLoc) return []
+    return [{
+      ...myDriver,
+      id: effectiveDriverId,
+      lat: myDriverLoc.lat,
+      lng: myDriverLoc.lng,
+    }]
+  }, [driverReady, locConfirmed, myDriver, myDriverLoc, effectiveDriverId])
+
   const myActiveOrder = useMemo(() => {
-    if (effectiveDriverId == null) return null
+    if (!driverReady || effectiveDriverId == null) return null
 
-    const ACTIVE = new Set(['assigned', 'accepted', 'en_route', 'enroute', 'picked_up', 'in_progress', 'on_trip', 'ongoing'])
+    const ACTIVE = new Set([
+      'assigned',
+      'accepted',
+      'en_route',
+      'enroute',
+      'picked_up',
+      'in_progress',
+      'on_trip',
+      'ongoing',
+    ])
 
-    const candidates = allOrders
-      .filter(o => o && sameId(o.driverId, effectiveDriverId))
+    const candidates = allOrdersFromProps
+      .filter(o => o && sameId(getAnyDriverId(o), effectiveDriverId))
       .filter(o => ACTIVE.has(normStatus(o.status)))
 
     if (!candidates.length) return null
 
-    const getTs = o => {
-      const u = o.updatedAt ? Date.parse(o.updatedAt) : NaN
-      if (Number.isFinite(u)) return u
-      const c = o.createdAt ? Date.parse(o.createdAt) : NaN
-      if (Number.isFinite(c)) return c
-      return typeof o.id === 'number' ? o.id : Number(o.id) || 0
+    candidates.sort(
+      (a, b) =>
+        (b.updatedAt ? Date.parse(b.updatedAt) : 0) -
+        (a.updatedAt ? Date.parse(a.updatedAt) : 0)
+    )
+    return candidates[0]
+  }, [allOrdersFromProps, effectiveDriverId, driverReady])
+
+  useEffect(() => {
+    if (myActiveOrder?.id != null) {
+      setSelectedOrderId(myActiveOrder.id)
+    }
+  }, [myActiveOrder])
+
+  const pendingHash = useMemo(() => {
+    const pending = allOrdersFromProps
+      .filter(o => isPendingStatus(o?.status))
+      .filter(o => getAnyDriverId(o) == null)
+      .map(o => `${o.id}:${round6(getPickupLoc(o)?.lat)}`)
+      .join('|')
+
+    return `${round6(myDriverLoc?.lat)}::${pending}`
+  }, [allOrdersFromProps, myDriverLoc])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function computeDistances() {
+      if (!myDriverLoc) return
+
+      const pending = allOrdersFromProps.filter(
+        o => isPendingStatus(o?.status) && getAnyDriverId(o) == null
+      )
+      if (!pending.length) return
+
+      const results = await mapLimit(pending, 4, async o => {
+        const p = getPickupLoc(o)
+        if (!p || cancelled) return null
+        try {
+          return { id: o.id, dKm: await osrmDistanceKm(myDriverLoc, p) }
+        } catch {
+          return null
+        }
+      })
+
+      if (!cancelled) {
+        const distMap = {}
+        results.forEach(r => {
+          if (r) distMap[r.id] = r.dKm
+        })
+        setOrderDistances(distMap)
+      }
     }
 
-    candidates.sort((a, b) => getTs(b) - getTs(a))
-    return candidates[0]
-  }, [allOrders, effectiveDriverId])
+    computeDistances()
+    return () => { cancelled = true }
+  }, [pendingHash, allOrdersFromProps, myDriverLoc])
 
-  const ordersForMap = useMemo(() => (myActiveOrder ? [myActiveOrder] : []), [myActiveOrder])
+  const pendingOrders = useMemo(() => {
+    return allOrdersFromProps
+      .filter(o => isPendingStatus(o?.status) && getAnyDriverId(o) == null)
+      .filter(o => !myCarType || normalizeVehicleType(o?.vehicleType) === myCarType)
+      .map(o => {
+        const d = orderDistances[o.id]
+        const price = o.estimatedFare || o.price || null
+        return {
+          ...o,
+          pickupLocation: getPickupLoc(o),
+          dispatchScore: d ? Math.max(1, Math.min(10, Math.round(11 - d))) : null,
+          driverDistanceKm: d || null,
+          price,
+        }
+      })
+  }, [allOrdersFromProps, myCarType, orderDistances])
 
-  // ====== 2) 我的已完成訂單 ======
+  const displayOrders = useMemo(() => {
+    if (myActiveOrder) {
+      return [myActiveOrder, ...pendingOrders.filter(o => o.id !== myActiveOrder.id)]
+    }
+    return pendingOrders
+  }, [myActiveOrder, pendingOrders])
+
+  const mapOrders = useMemo(() => {
+    if (!driverReady || !locConfirmed || !myDriverLoc) return []
+
+    let baseOrder = null
+    if (myActiveOrder) {
+      baseOrder = myActiveOrder
+    } else if (selectedOrderId) {
+      baseOrder = pendingOrders.find(o => o.id === selectedOrderId) || null
+    } else {
+      baseOrder =
+        [...pendingOrders].sort(
+          (a, b) => (a.driverDistanceKm || Infinity) - (b.driverDistanceKm || Infinity)
+        )[0] || null
+    }
+
+    if (!baseOrder) return []
+
+    const pickup = getPickupLoc(baseOrder)
+    if (!pickup) return []
+
+    const { polyline, route, directions, path, ...cleanOrder } = baseOrder
+
+    const linearStops = [
+      {
+        lat: round6(myDriverLoc.lat),
+        lng: round6(myDriverLoc.lng),
+        text: '我的位置',
+        type: 'driver',
+      },
+      {
+        lat: round6(pickup.lat),
+        lng: round6(pickup.lng),
+        text: '乘客上車',
+        type: 'pickup',
+      },
+    ]
+
+    const originalStops = (cleanOrder.stops || []).filter(s => {
+      if (!s) return false
+      const type = String(s.type || '').toLowerCase()
+      if (type === 'driver' || type === 'pickup') return false
+
+      const lat = Number(s.lat)
+      const lng = Number(s.lng)
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false
+
+      const isAtPickup =
+        Math.abs(lat - pickup.lat) < 0.0001 &&
+        Math.abs(lng - pickup.lng) < 0.0001
+
+      return !isAtPickup
+    })
+
+    const routeSig =
+      `${effectiveDriverId}:${baseOrder.id}:` +
+      `${round6(myDriverLoc.lat)},${round6(myDriverLoc.lng)}->` +
+      `${round6(pickup.lat)},${round6(pickup.lng)}`
+
+    return [
+      {
+        ...cleanOrder,
+        driverId: effectiveDriverId,
+        stops: [...linearStops, ...originalStops],
+        _forceUpdate: routeSig,
+      },
+    ]
+  }, [locConfirmed, myDriverLoc, myActiveOrder, selectedOrderId, pendingOrders, effectiveDriverId, driverReady])
+
+const shouldFollowCar = useMemo(() => {
+  if (!locConfirmed || !myDriverLoc) return false
+  return Boolean(
+    myActiveOrder ||
+    selectedOrderId != null ||
+    mapOrders.length > 0
+  )
+}, [locConfirmed, myDriverLoc, myActiveOrder, selectedOrderId, mapOrders])
+
   const myCompletedOrders = useMemo(() => {
     if (effectiveDriverId == null) return []
-    const done = allOrders
-      .filter(o => o && sameId(o.driverId, effectiveDriverId))
+    const done = allOrdersFromProps
+      .filter(o => o && sameId(getAnyDriverId(o), effectiveDriverId))
       .filter(o => normStatus(o.status) === 'completed')
 
-    const getTs = o => {
-      const u = o.completedAt ? Date.parse(o.completedAt) : NaN
-      if (Number.isFinite(u)) return u
-      const x = o.updatedAt ? Date.parse(o.updatedAt) : NaN
-      if (Number.isFinite(x)) return x
-      const c = o.createdAt ? Date.parse(o.createdAt) : NaN
-      if (Number.isFinite(c)) return c
-      return typeof o.id === 'number' ? o.id : Number(o.id) || 0
-    }
-
-    done.sort((a, b) => getTs(b) - getTs(a))
+    done.sort(
+      (a, b) =>
+        (b.completedAt ? Date.parse(b.completedAt) : 0) -
+        (a.completedAt ? Date.parse(a.completedAt) : 0)
+    )
     return done
-  }, [allOrders, effectiveDriverId])
+  }, [allOrdersFromProps, effectiveDriverId])
 
-  // ====== 3) 偵測剛完成 → 顯示通知 ======
+  const handleAcceptAndSync = useCallback(async (orderId) => {
+  setSelectedOrderId(orderId)
+  await acceptOrder(orderId)
+  await refresh?.()
+}, [acceptOrder, refresh])
+
   useEffect(() => {
     if (!myCompletedOrders.length) return
 
     let newlyCompleted = null
     for (const o of myCompletedOrders) {
-      if (!completedSeenRef.current.has(o.id)) {
+      const key = makeOrderKey(o) || `id:${o?.id ?? ''}`
+      if (!completedSeenRef.current.has(key)) {
         newlyCompleted = o
-        completedSeenRef.current.add(o.id)
+        completedSeenRef.current.add(key)
         break
       }
     }
+
     if (!newlyCompleted) return
 
-    const price =
-      typeof newlyCompleted.estimatedFare === 'number'
-        ? newlyCompleted.estimatedFare
-        : typeof newlyCompleted.estimatedPrice === 'number'
-        ? newlyCompleted.estimatedPrice
-        : null
-
+    const price = newlyCompleted.estimatedFare || newlyCompleted.price || null
     setCompletedNotice(
-      `此筆訂單已完成（#${newlyCompleted.id}），已完成共：${price != null ? `$${price.toFixed(2)}` : '金額未知'}`
+      `此筆訂單已完成（#${newlyCompleted.id}），金額：${price != null ? `$${price.toFixed(2)}` : '未知'}`
     )
-
-    const timer = setTimeout(() => setCompletedNotice(''), 7000)
-    return () => clearTimeout(timer)
+    setTimeout(() => setCompletedNotice(''), 7000)
   }, [myCompletedOrders])
-
-  // ====== 計算 pending 訂單到上車點距離 ======
-  useEffect(() => {
-    async function computeDistances() {
-      if (!myDriver || typeof myDriver.lat !== 'number' || typeof myDriver.lng !== 'number') {
-        setOrderDistances({})
-        return
-      }
-
-      const distMap = {}
-      const pending = allOrders.filter(o => isPendingStatus(o?.status))
-
-      for (const o of pending) {
-        const pickup = getPickupLoc(o)
-        if (!pickup) continue
-        try {
-          const dKm = await osrmDistanceKm(
-            { lat: myDriver.lat, lng: myDriver.lng },
-            { lat: pickup.lat, lng: pickup.lng }
-          )
-          distMap[o.id] = dKm
-        } catch (e) {
-          console.warn('OSRM distance error for order', o?.id, e)
-        }
-      }
-
-      setOrderDistances(distMap)
-    }
-
-    computeDistances()
-  }, [myDriver, allOrders])
-
-  // ✅ 待接訂單列表
-  const pendingOrders = useMemo(() => {
-    return allOrders
-      .filter(o => isPendingStatus(o?.status))
-      .filter(o => {
-        if (!myCarType) return true
-        const orderType = normalizeVehicleType(o?.vehicleType)
-        if (!orderType) return true
-        return orderType === myCarType
-      })
-      .map(o => {
-        let dispatchScore = null
-        let driverDistanceKm = null
-
-        if (myDriver && typeof myDriver.lat === 'number' && typeof myDriver.lng === 'number') {
-          const d = orderDistances[o.id]
-          if (typeof d === 'number') {
-            driverDistanceKm = d
-            const rawScore = 11 - d
-            dispatchScore = Math.max(1, Math.min(10, Math.round(rawScore)))
-          }
-        }
-
-        const tripDistanceKm = typeof o.distanceKm === 'number' ? o.distanceKm : null
-        const tripPrice =
-          typeof o.estimatedFare === 'number'
-            ? o.estimatedFare
-            : typeof o.estimatedPrice === 'number'
-            ? o.estimatedPrice
-            : null
-
-        return {
-          ...o,
-          pickupLocation: o.pickupLocation ?? getPickupLoc(o) ?? null,
-          dropoffLocation: o.dropoffLocation ?? getDropoffLoc(o) ?? null,
-          dispatchScore,
-          driverDistanceKm,
-          distanceKm: tripDistanceKm,
-          price: tripPrice,
-        }
-      })
-  }, [allOrders, myCarType, myDriver, orderDistances])
-
-  // ✅ debug logs（不會炸）
-  useEffect(() => {
-    console.log('DriverView allOrders:', allOrders)
-    console.log('DriverView pendingOrders:', pendingOrders)
-    console.log('myCarType:', myCarType, 'effectiveDriverId:', effectiveDriverId, 'myDriver:', myDriver)
-  }, [allOrders, pendingOrders, myCarType, effectiveDriverId, myDriver])
-
-  const visibleDrivers = myDriver ? [myDriver] : []
-  const isLoggedIn = Boolean(currentUser?.username)
 
   return (
     <section className="map-section">
       <div className="map-wrapper">
         <MapView
-          lang={lang}
-          drivers={visibleDrivers}
-          orders={ordersForMap}
+key={`driver-map:${driverReady ? effectiveDriverId : 'pending'}`}          lang={lang}
+          drivers={driverReady ? visibleDrivers : []}
+          orders={driverReady ? mapOrders : []}
           mode="driver"
-          currentDriverId={effectiveDriverId}
-          onDriverLocationChange={onDriverLocationChange}
+          currentDriverId={driverReady ? effectiveDriverId : null}
+          onDriverLocationChange={handleDriverLocationChange}
+          driverClickEnabled={driverReady && !locConfirmed}
           simulateVehicles={simulateVehicles}
           onOrderCompleted={onOrderCompleted}
+          onCarPosChange={onCarPosChange}
+          usePersistedDriverLoc={false}
+          followActiveCar={shouldFollowCar}
+          previewEnabled={false}
+          rotateMapWithHeading={true}
+          hotspots={showHotspots ? hotspots : []}
         />
       </div>
 
@@ -317,7 +566,6 @@ export default function DriverView({
           <h1 className="panel-title">{t(lang, 'driverMode')}</h1>
 
           <div className="field-label">{t(lang, 'currentDriverLabel')}</div>
-
           {isLoggedIn ? (
             <div className="current-driver-box">{currentUser.username}</div>
           ) : (
@@ -326,79 +574,30 @@ export default function DriverView({
               className="current-driver-box"
               onClick={goAuth}
               style={{ cursor: 'pointer' }}
-              aria-label="請先登入"
             >
               請先登入
             </button>
           )}
 
-          {completedNotice && (
-            <div className="auth-hint" style={{ marginTop: 10, color: '#ff5252', fontWeight: 700 }}>
-              {completedNotice}
+          {completedNotice && <div className="ub-toast ub-toast--success">{completedNotice}</div>}
+
+          {isLoggedIn && !locConfirmed && (
+            <div className="ub-toast ub-toast--warn" style={{ marginBottom: 12 }}>
+              ⚠️ 請先在地圖上點擊一下，設定您的初始位置。
             </div>
           )}
 
-          {myDriver && (myDriver.lat == null || myDriver.lng == null) && (
-            <div className="auth-hint" style={{ marginTop: 8, color: '#ffc107' }}>
-              請先在地圖上點一下，手動設定您目前的位置。
+          {isLoggedIn && effectiveDriverId != null && (
+            <div style={{ marginBottom: 12 }}>
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={resetMyLocation}
+                style={{ width: '100%' }}
+              >
+                重設定位（debug）
+              </button>
             </div>
-          )}
-
-          {isLoggedIn && myCompletedOrders.length > 0 && (
-            <section className="orders-block" style={{ marginTop: 14 }}>
-              <div className="orders-header">
-                <h3>已完成訂單</h3>
-              </div>
-
-              <div style={{ display: 'grid', gap: 10 }}>
-                {myCompletedOrders.slice(0, 5).map(o => {
-                  const price =
-                    typeof o.estimatedFare === 'number'
-                      ? o.estimatedFare
-                      : typeof o.estimatedPrice === 'number'
-                      ? o.estimatedPrice
-                      : null
-
-                  return (
-                    <div
-                      key={`done-${o.id}`}
-                      style={{
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        borderRadius: 12,
-                        padding: 12,
-                        opacity: 0.7,
-                        background: 'rgba(0, 0, 0, 0.25)',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                        <div style={{ fontWeight: 800 }}>
-                          訂單 #{o.id}{' '}
-                          <span style={{ color: 'rgba(2, 156, 69, 0.25)', marginLeft: 8, fontWeight: 900 }}>已完成</span>
-                        </div>
-                        <div style={{ fontSize: 12, opacity: 0.85 }}>
-                          {o.completedAt ? new Date(o.completedAt).toLocaleString() : ''}
-                        </div>
-                      </div>
-
-                      <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.4 }}>
-                        <div>乘客：{o.customer || '-'}</div>
-                        <div>上車：{o.pickup}</div>
-                        <div>目的地：{o.dropoff}</div>
-                        {Array.isArray(o.stops) && o.stops.length > 0 && (
-                          <div>
-                            停靠點：{o.stops.map(s => s?.label || s?.text || '').filter(Boolean).join(' → ')}
-                          </div>
-                        )}
-                        <div>
-                          距離：{typeof o.distanceKm === 'number' ? `${o.distanceKm} km` : '-'}，已完成：
-                          {price != null ? ` $${price.toFixed(2)}` : ' -'}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
           )}
 
           <section className="orders-block" style={{ marginTop: 14 }}>
@@ -411,11 +610,13 @@ export default function DriverView({
 
             <OrderList
               lang={lang}
-              orders={pendingOrders}
+              orders={locConfirmed ? displayOrders : []}
               isDriverView
-              onAcceptOrder={acceptOrder}
+              onAcceptOrder={handleAcceptAndSync}
               drivers={drivers}
-              currentDriverId={effectiveDriverId}
+              currentDriverId={driverReady ? effectiveDriverId : null}
+              selectedOrderId={selectedOrderId}
+              onSelectOrder={id => setSelectedOrderId(id)}
             />
 
             {loading && (
@@ -425,6 +626,33 @@ export default function DriverView({
             )}
             {error && <div className="error-box">{error}</div>}
           </section>
+
+          {isLoggedIn && myCompletedOrders.length > 0 && (
+            <section className="orders-block" style={{ marginTop: 14 }}>
+              <h3>已完成訂單</h3>
+              {myCompletedOrders.slice(0, 5).map(o => (
+                <div
+                  key={o.id}
+                  style={{
+                    border: '1px solid rgba(0,0,0,0.1)',
+                    borderRadius: 12,
+                    padding: 12,
+                    marginBottom: 8,
+                    background: '#fff',
+                  }}
+                >
+                  <div style={{ fontWeight: 800 }}>
+                    訂單 #{o.id} <span style={{ color: 'green' }}>已完成</span>
+                  </div>
+                  <div style={{ fontSize: 13 }}>
+                    上車：{o.pickup}
+                    <br />
+                    下車：{o.dropoff}
+                  </div>
+                </div>
+              ))}
+            </section>
+          )}
         </div>
       </aside>
     </section>

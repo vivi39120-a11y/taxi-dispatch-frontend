@@ -30,13 +30,42 @@ function statusLabel(lang, statusKey) {
   return dict[statusKey] || (lang === 'zh' ? '進行中' : 'In progress')
 }
 
+function statusTone(statusKey) {
+  if (statusKey === 'completed') return 'success'
+  if (statusKey === 'cancelled') return 'danger'
+  if (statusKey === 'en_route') return 'warn'
+  if (statusKey === 'accepted' || statusKey === 'assigned') return 'info'
+  if (statusKey === 'pending') return 'muted'
+  return 'muted'
+}
+
+function extractStops(o) {
+  const stopsArr = Array.isArray(o?.stops)
+    ? o.stops
+    : Array.isArray(o?.resolvedStops)
+    ? o.resolvedStops
+    : Array.isArray(o?.stopovers)
+    ? o.stopovers
+    : []
+
+  const stopsText = stopsArr
+    .map(s => s?.label || s?.text || s?.name || '')
+    .map(x => String(x).trim())
+    .filter(Boolean)
+
+  const visibleStops = stopsText.slice(0, 2)
+  const moreCount = Math.max(0, stopsText.length - visibleStops.length)
+
+  return { visibleStops, moreCount, total: stopsText.length }
+}
+
 export default function OrderList({
   lang,
   orders,
   drivers,
   isDriverView,
-  currentDriverId,     // ✅ 新增：司機 ID（DriverView 會傳）
-  onAcceptOrder,       // ✅ 新增：接單 callback（DriverView 會傳）
+  currentDriverId, // 司機端會傳
+  onAcceptOrder, // 司機端會傳
   selectedOrderId,
   completedOrderIds,
   onSelectOrder,
@@ -52,68 +81,68 @@ export default function OrderList({
   const list = Array.isArray(orders) ? orders : []
 
   return (
-    <div className="order-groups">
-      <div className="order-group">
-        <div className="order-group-header">
-          <div className="order-group-title">
-            {t(lang, isDriverView ? 'ordersTitleDriver' : 'ordersTitlePassenger')}
-          </div>
-          <div className="order-group-sub">{list.length} 筆</div>
+    <div className="ub-orders">
+      <div className="ub-orders__header">
+        <div className="ub-orders__title">
+          {t(lang, isDriverView ? 'ordersTitleDriver' : 'ordersTitlePassenger')}
         </div>
+        <div className="ub-orders__count">{list.length} 筆</div>
+      </div>
 
-        <div className="order-cards">
-          {list.map(o => {
-            const id = o?.id
-            const isSelected = id != null && selectedOrderId === id
+      <div className="ub-orders__grid">
+        {list.map(o => {
+          const id = o?.id
+          const isSelected = id != null && selectedOrderId === id
 
-            // ✅ 只信 completedOrderIds：不管後端 status 怎麼亂寫
-            const done = Boolean(completedOrderIds?.has?.(id))
+          // ✅ 只信 completedOrderIds：避免後端狀態亂寫
+          const done = Boolean(completedOrderIds?.has?.(id))
 
-            const rawStatus = normalizeStatus(o?.status)
-            const statusKey = done ? 'completed' : rawStatus
+          const rawStatus = normalizeStatus(o?.status)
+          const statusKey = done ? 'completed' : rawStatus
 
-            const pickup = o?.pickup ?? o?.pickupText ?? o?.pickup_label ?? '-'
-            const dropoff = o?.dropoff ?? o?.dropoffText ?? o?.dropoff_label ?? '-'
+          const pickup = o?.pickup ?? o?.pickupText ?? o?.pickup_label ?? '-'
+          const dropoff = o?.dropoff ?? o?.dropoffText ?? o?.dropoff_label ?? '-'
 
-            const driverId = o?.driverId ?? o?.assignedDriverId ?? o?.driver_id
-            const driverName =
-              driverId != null
-                ? (driverMap.get(driverId)?.name || driverMap.get(driverId)?.username || '')
-                : ''
+          const driverId = o?.driverId ?? o?.assignedDriverId ?? o?.driver_id
+          const driverName =
+            driverId != null
+              ? (driverMap.get(driverId)?.name || driverMap.get(driverId)?.username || '')
+              : ''
 
-            const cardCls = ['order-card', isSelected ? 'selected' : '', done ? 'completed' : '']
-              .filter(Boolean)
-              .join(' ')
+          // ✅ 司機端：pending + 未指派司機 + 有接單 callback => 顯示「接單」
+          const canAccept =
+            Boolean(isDriverView) &&
+            !done &&
+            statusKey === 'pending' &&
+            driverId == null &&
+            typeof onAcceptOrder === 'function'
 
-            // ✅ 司機端：pending + 未指派司機 + 有接單函式 => 顯示「接單」
-            const canAccept =
-              Boolean(isDriverView) &&
-              !done &&
-              statusKey === 'pending' &&
-              (driverId == null) &&
-              typeof onAcceptOrder === 'function'
+          const acceptDisabled = !currentDriverId || id == null
 
-            const acceptDisabled = !currentDriverId || id == null
+          const onAccept = e => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (acceptDisabled) return
+            onAcceptOrder(id, currentDriverId)
+          }
 
-            const onAccept = e => {
-              e.preventDefault()
-              e.stopPropagation()
-              if (acceptDisabled) return
-              // 多傳 driverId 不會傷到既有函式（多餘參數會被忽略）
-              onAcceptOrder(id, currentDriverId)
-            }
+          const tone = statusTone(statusKey)
+          const { visibleStops, moreCount } = extractStops(o)
 
-            return (
-              <button
-                key={id ?? Math.random()}
-                type="button"
-                className={cardCls}
-                onClick={() => id != null && onSelectOrder?.(id)}
-              >
-                <div className="order-card-top">
+          return (
+            <button
+              key={id ?? Math.random()}
+              type="button"
+              className={['ub-orderCard', isSelected ? 'is-selected' : '', done ? 'is-done' : '']
+                .filter(Boolean)
+                .join(' ')}
+              onClick={() => id != null && onSelectOrder?.(id)}
+            >
+              <div className="ub-orderCard__top">
+                <div className="ub-orderCard__chips">
                   {canAccept ? (
                     <span
-                      className={`badge pending ${acceptDisabled ? 'disabled' : ''}`}
+                      className={`ub-chip ub-chip--action ${acceptDisabled ? 'is-disabled' : ''}`}
                       role="button"
                       tabIndex={0}
                       aria-disabled={acceptDisabled}
@@ -122,46 +151,74 @@ export default function OrderList({
                         if (e.key === 'Enter' || e.key === ' ') onAccept(e)
                       }}
                       title={acceptDisabled ? '請先登入/選擇司機' : '接單'}
-                      style={{ cursor: acceptDisabled ? 'not-allowed' : 'pointer' }}
                     >
                       接單
                     </span>
                   ) : (
-                    <span className={`badge ${statusKey}`}>{statusLabel(lang, statusKey)}</span>
+                    <span className={`ub-chip ub-chip--${tone}`}>{statusLabel(lang, statusKey)}</span>
                   )}
 
-                  <span className="order-id">#{id ?? '-'}</span>
+                  {o?.vehicleType ? <span className="ub-chip ub-chip--ghost">{o.vehicleType}</span> : null}
+
+                  {/* 額外資訊可選：顯示司機名（乘客端也可看得到） */}
+                  {driverName ? <span className="ub-chip ub-chip--ghost">{driverName}</span> : null}
                 </div>
 
-                <div className="order-route">
-                  <div className="order-point">
-                    <span className="k">上車：</span>
-                    <span>{pickup}</span>
-                  </div>
-                  <div className="order-point">
-                    <span className="k">下車：</span>
-                    <span>{dropoff}</span>
+                <div className="ub-orderCard__id">#{id ?? '-'}</div>
+              </div>
+
+              <div className="ub-route">
+                <div className="ub-route__row">
+                  <span className="ub-route__dot" aria-hidden="true" />
+                  <div className="ub-route__content">
+                    <div className="ub-route__label">上車</div>
+                    <div className="ub-route__text">{pickup}</div>
                   </div>
                 </div>
 
-                <div className="order-footer">
-                  <div className="dim">司機：{driverName || driverId || '—'}</div>
-                  <div className="dim">車種：{o?.vehicleType || '—'}</div>
-                  <div className="dim">
-                    距離：{typeof o?.distanceKm === 'number' ? `${o.distanceKm.toFixed(1)} km` : '—'}
+                {/* ✅ 停靠點（新增） */}
+                {visibleStops.length > 0 && (
+                  <div className="ub-route__stops">
+                    <div className="ub-route__stopsLabel">停靠點</div>
+                    <div className="ub-route__stopsText">
+                      {visibleStops.join(' · ')}
+                      {moreCount > 0 ? ` · +${moreCount}` : ''}
+                    </div>
                   </div>
-                  <div className="dim">時間：{o?.updatedAt || o?.createdAt || '—'}</div>
-                </div>
-              </button>
-            )
-          })}
+                )}
 
-          {!list.length && (
-            <div className="auth-hint" style={{ opacity: 0.8, padding: '10px 2px' }}>
-              目前沒有訂單
-            </div>
-          )}
-        </div>
+                <div className="ub-route__row" style={{ marginTop: 10 }}>
+                  <span className="ub-route__dot is-hollow" aria-hidden="true" />
+                  <div className="ub-route__content">
+                    <div className="ub-route__label">下車</div>
+                    <div className="ub-route__text">{dropoff}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="ub-meta">
+                <div className="ub-meta__item">
+                  <span className="ub-meta__k">司機</span>
+                  <span className="ub-meta__v">{driverName || driverId || '—'}</span>
+                </div>
+
+                <div className="ub-meta__item">
+                  <span className="ub-meta__k">距離</span>
+                  <span className="ub-meta__v">
+                    {typeof o?.distanceKm === 'number' ? `${o.distanceKm.toFixed(1)} km` : '—'}
+                  </span>
+                </div>
+
+                <div className="ub-meta__item ub-meta__item--full">
+                  <span className="ub-meta__k">時間</span>
+                  <span className="ub-meta__v">{o?.updatedAt || o?.createdAt || '—'}</span>
+                </div>
+              </div>
+            </button>
+          )
+        })}
+
+        {!list.length && <div className="ub-empty">目前沒有訂單</div>}
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-// src/i18n.js
+// src/i18n.js  (不能刪!!!)
 
 const messages = {
   zh: {
@@ -138,6 +138,33 @@ const messages = {
     landingFooterAndroid: '🤖 Android 下載',
     landingFooterCopyright:
       '© 2025 SmartDispatch Project. Department of Computer Science.',
+      // OrderList (new)
+ordersCountSuffix: '筆',
+orderIdPrefix: '#',
+orderPickupLabel: '上車',
+orderDropoffLabel: '下車',
+orderStopsLabel: '停靠點',
+orderStopsExpand: '展開',
+orderStopsCollapse: '收合',
+orderStopsMore: '個更多',
+orderDriverLabel: '司機',
+orderDistanceLabel: '距離',
+orderTimeLabel: '時間',
+orderAccept: '接單',
+orderAcceptDisabledHint: '請先登入/選擇司機',
+orderEmpty: '目前沒有訂單',
+
+// Order status (new, i18n-based)
+orderStatus_pending: '等待派單',
+orderStatus_assigned: '已指派',
+orderStatus_accepted: '司機已接單',
+orderStatus_en_route: '前往上車點',
+orderStatus_in_progress: '行程中',
+orderStatus_completed: '已完成',
+orderStatus_cancelled: '已取消',
+
+
+    
   },
 
   en: {
@@ -279,6 +306,29 @@ const messages = {
     landingFooterAndroid: '🤖 Download for Android',
     landingFooterCopyright:
       '© 2025 SmartDispatch Project. Department of Computer Science.',
+      ordersCountSuffix: 'orders',
+orderIdPrefix: '#',
+orderPickupLabel: 'Pickup',
+orderDropoffLabel: 'Dropoff',
+orderStopsLabel: 'Stops',
+orderStopsExpand: 'Expand',
+orderStopsCollapse: 'Collapse',
+orderStopsMore: 'more',
+orderDriverLabel: 'Driver',
+orderDistanceLabel: 'Distance',
+orderTimeLabel: 'Time',
+orderAccept: 'Accept',
+orderAcceptDisabledHint: 'Please log in / select a driver',
+orderEmpty: 'No orders yet',
+
+orderStatus_pending: 'Pending',
+orderStatus_assigned: 'Assigned',
+orderStatus_accepted: 'Accepted',
+orderStatus_en_route: 'En route',
+orderStatus_in_progress: 'In progress',
+orderStatus_completed: 'Completed',
+orderStatus_cancelled: 'Cancelled',
+
   },
 
   ko: {
@@ -418,6 +468,29 @@ const messages = {
     landingFooterAndroid: '🤖 Android 다운로드',
     landingFooterCopyright:
       '© 2025 SmartDispatch Project. Department of Computer Science.',
+      ordersCountSuffix: '건',
+orderIdPrefix: '#',
+orderPickupLabel: '승차',
+orderDropoffLabel: '하차',
+orderStopsLabel: '경유지',
+orderStopsExpand: '펼치기',
+orderStopsCollapse: '접기',
+orderStopsMore: '개 더보기',
+orderDriverLabel: '기사',
+orderDistanceLabel: '거리',
+orderTimeLabel: '시간',
+orderAccept: '수락',
+orderAcceptDisabledHint: '먼저 로그인/기사 선택',
+orderEmpty: '주문이 없습니다',
+
+orderStatus_pending: '대기',
+orderStatus_assigned: '배정됨',
+orderStatus_accepted: '수락됨',
+orderStatus_en_route: '승차 지점으로 이동 중',
+orderStatus_in_progress: '운행 중',
+orderStatus_completed: '완료',
+orderStatus_cancelled: '취소됨',
+
   },
 
   ja: {
@@ -562,6 +635,29 @@ const messages = {
     landingFooterAndroid: '🤖 Android ダウンロード',
     landingFooterCopyright:
       '© 2025 SmartDispatch Project. Department of Computer Science.',
+      ordersCountSuffix: '件',
+orderIdPrefix: '#',
+orderPickupLabel: '乗車',
+orderDropoffLabel: '降車',
+orderStopsLabel: '経由地',
+orderStopsExpand: '展開',
+orderStopsCollapse: '折りたたむ',
+orderStopsMore: '件の追加',
+orderDriverLabel: 'ドライバー',
+orderDistanceLabel: '距離',
+orderTimeLabel: '時間',
+orderAccept: '受諾',
+orderAcceptDisabledHint: '先にログイン/ドライバー選択',
+orderEmpty: '注文がありません',
+
+orderStatus_pending: '待機',
+orderStatus_assigned: '割り当て済み',
+orderStatus_accepted: '受諾済み',
+orderStatus_en_route: '迎えに向かっています',
+orderStatus_in_progress: '走行中',
+orderStatus_completed: '完了',
+orderStatus_cancelled: 'キャンセル',
+
   },
 }
 
@@ -571,3 +667,4 @@ export function t(lang, key) {
   const langCode = messages[lang] ? lang : 'zh'
   return messages[langCode][key] ?? messages.zh[key] ?? key
 }
+

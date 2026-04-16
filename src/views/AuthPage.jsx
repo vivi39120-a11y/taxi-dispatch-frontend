@@ -1,16 +1,49 @@
 // src/views/AuthPage.jsx
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { t } from '../i18n'
 import './AuthPage.css'
 
-export default function AuthPage({ lang, onBack, onRegister, onLogin }) {
+export default function AuthPage({ lang, onBack, onRegister, onLogin, defaultRole = 'passenger' }) {
   const [tab, setTab] = useState('login') // 'login' | 'register'
-  const [role, setRole] = useState('passenger') // 只在註冊時用
+
+  // ✅ role：登入/註冊都使用（登入要決定打哪個 endpoint）
+  const [role, setRole] = useState(defaultRole === 'driver' ? 'driver' : 'passenger')
+
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [carType, setCarType] = useState('') // driver 用
+  const [carType, setCarType] = useState('') // driver 註冊用
+
   const [error, setError] = useState('') // 存「錯誤 key」
   const [submitting, setSubmitting] = useState(false)
+
+  // ✅ 如果 App 依 URL 推了 defaultRole（例如 /?role=driver&auth=1），同步到表單
+  useEffect(() => {
+    if (defaultRole === 'driver') setRole('driver')
+    else if (defaultRole === 'passenger') setRole('passenger')
+  }, [defaultRole])
+
+  const mapLoginErrorToKey = msg => {
+    const s = String(msg || '').trim()
+
+    // 後端原生字串（你的 FastAPI）
+    if (s === 'invalid credentials') return 'errorWrongPassword' // 或你想用 errorInvalidCredentials
+    if (s === 'not a passenger account') return 'errorNotPassengerAccount'
+    if (s === 'not a driver account') return 'errorNotDriverAccount'
+
+    // 兼容你舊的 key/文字
+    if (s === 'auth_loginFailed') return 'errorWrongPassword'
+    if (s === 'loginFailed') return 'errorUserNotFound'
+
+    // 若後端直接回我們的 key（或你自己丟回來）
+    return s || 'loginFailed'
+  }
+
+  const mapRegisterErrorToKey = msg => {
+    const s = String(msg || '').trim()
+    if (s === 'username already exists') return 'errorUsernameTaken'
+    if (s === 'auth_registerFailed') return 'errorUsernameTaken'
+    return s || 'registerFailed'
+  }
 
   const handleSubmit = async e => {
     e.preventDefault()
@@ -20,89 +53,36 @@ export default function AuthPage({ lang, onBack, onRegister, onLogin }) {
 
     try {
       if (tab === 'login') {
-        // ===== 登入 =====
-        const result =
-          (await onLogin?.({ username, password })) || { ok: false }
+        // ✅ 登入：把 role 一起送回 App，讓 App 不用猜 endpoint
+        const result = (await onLogin?.({ username, password, role })) || { ok: false }
 
         if (!result.ok) {
-          let key = ''
-
-          if (typeof result.message === 'string') {
-            const msg = result.message
-
-            // 先把「可能出現的各種字串」都對應回我們自己的錯誤 key
-            const authLoginFailedText = t(lang, 'auth_loginFailed') // 例如「密碼錯誤！」
-            const loginFailedText = t(lang, 'loginFailed') // 例如「登入失敗」
-
-            // ---- 密碼錯誤 ----
-            if (
-              msg === 'auth_loginFailed' ||          // 舊 key
-              msg === 'errorWrongPassword' ||        // 新 key
-              msg === authLoginFailedText            // 已翻譯好的文字
-            ) {
-              key = 'errorWrongPassword'             // 統一成「密碼錯誤」
-            }
-            // ---- 尚未註冊 ----
-            else if (
-              msg === 'loginFailed' ||               // 舊 key
-              msg === 'errorUserNotFound' ||         // 新 key
-              msg === loginFailedText                // 已翻譯好的「登入失敗」
-            ) {
-              key = 'errorUserNotFound'              // 統一成「請先註冊」
-            }
-            // 其他狀況 → 就直接拿來當 i18n key
-            else {
-              key = msg
-            }
-          } else {
-            // 如果 message 不是字串，就當作「尚未註冊」
-            key = 'errorUserNotFound'
-          }
-
-          setError(key)
+          setError(mapLoginErrorToKey(result.message))
         }
-      } else {
-        // ===== 註冊 =====
-        if (!username || !password) {
-          setError('errorMissingFields') // 請輸入完整的帳號與密碼。
-          return
-        }
-        if (role === 'driver' && !carType) {
-          setError('selectCarTypeHint') // 請選擇車輛種類
-          return
-        }
+        return
+      }
 
-        const payload = {
-          username,
-          password,
-          role,
-          carType: role === 'driver' ? carType : null,
-        }
+      // ===== 註冊 =====
+      if (!username || !password) {
+        setError('errorMissingFields')
+        return
+      }
+      if (role === 'driver' && !carType) {
+        setError('selectCarTypeHint')
+        return
+      }
 
-        const result = (await onRegister?.(payload)) || { ok: false }
+      const payload = {
+        username,
+        password,
+        role,
+        carType: role === 'driver' ? carType : null,
+      }
 
-        if (!result.ok) {
-          let key = ''
+      const result = (await onRegister?.(payload)) || { ok: false }
 
-          if (typeof result.message === 'string') {
-            const msg = result.message
-            const authRegisterFailedText = t(lang, 'auth_registerFailed')
-
-            if (
-              msg === 'auth_registerFailed' ||       // 舊 key
-              msg === 'errorUsernameTaken' ||        // 新 key
-              msg === authRegisterFailedText         // 已翻譯好的文字
-            ) {
-              key = 'errorUsernameTaken'             // 此帳號名稱已存在，請重新輸入
-            } else {
-              key = msg
-            }
-          } else {
-            key = 'errorUsernameTaken'
-          }
-
-          setError(key)
-        }
+      if (!result.ok) {
+        setError(mapRegisterErrorToKey(result.message))
       }
     } finally {
       setSubmitting(false)
@@ -116,23 +96,17 @@ export default function AuthPage({ lang, onBack, onRegister, onLogin }) {
         <div className="auth-header">
           <h2 className="auth-title">{t(lang, 'authTitle')}</h2>
           {onBack && (
-            <button
-              type="button"
-              className="auth-back-btn"
-              onClick={onBack}
-            >
+            <button type="button" className="auth-back-btn" onClick={onBack}>
               {t(lang, 'backHome')}
             </button>
           )}
         </div>
 
-        {/* 登入 / 註冊 tab 切換 */}
+        {/* 登入 / 註冊 tab */}
         <div className="auth-tabs">
           <button
             type="button"
-            className={
-              'auth-tab' + (tab === 'login' ? ' auth-tab-active' : '')
-            }
+            className={'auth-tab' + (tab === 'login' ? ' auth-tab-active' : '')}
             onClick={() => {
               setTab('login')
               setError('')
@@ -142,9 +116,7 @@ export default function AuthPage({ lang, onBack, onRegister, onLogin }) {
           </button>
           <button
             type="button"
-            className={
-              'auth-tab' + (tab === 'register' ? ' auth-tab-active' : '')
-            }
+            className={'auth-tab' + (tab === 'register' ? ' auth-tab-active' : '')}
             onClick={() => {
               setTab('register')
               setError('')
@@ -154,80 +126,54 @@ export default function AuthPage({ lang, onBack, onRegister, onLogin }) {
           </button>
         </div>
 
-        {/* 錯誤訊息：一律當成 key 交給 t() 翻譯 */}
-        {error && (
-          <div className="auth-error-banner">
-            {t(lang, error)}
-          </div>
-        )}
+        {/* 錯誤訊息（key → i18n） */}
+        {error && <div className="auth-error-banner">{t(lang, error)}</div>}
 
-        {/* 表單 */}
         <form onSubmit={handleSubmit} className="auth-form">
-          {/* 註冊才選身分 & 車種 */}
-          {tab === 'register' && (
-            <>
-              <div className="auth-field">
-                <label className="auth-label">
-                  {t(lang, 'roleLabel')}
-                </label>
-                <div className="auth-radio-group">
-                  <label>
-                    <input
-                      type="radio"
-                      value="passenger"
-                      checked={role === 'passenger'}
-                      onChange={() => {
-                        setRole('passenger')
-                        setCarType('')
-                      }}
-                    />
-                    {t(lang, 'rolePassenger')}
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      value="driver"
-                      checked={role === 'driver'}
-                      onChange={() => setRole('driver')}
-                    />
-                    {t(lang, 'roleDriver')}
-                  </label>
-                </div>
-              </div>
+          {/* ✅ 身分：登入/註冊都顯示，避免 App 猜錯 endpoint */}
+          <div className="auth-field">
+            <label className="auth-label">{t(lang, 'roleLabel')}</label>
+            <div className="auth-radio-group">
+              <label>
+                <input
+                  type="radio"
+                  value="passenger"
+                  checked={role === 'passenger'}
+                  onChange={() => {
+                    setRole('passenger')
+                    setCarType('')
+                  }}
+                />
+                {t(lang, 'rolePassenger')}
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  value="driver"
+                  checked={role === 'driver'}
+                  onChange={() => setRole('driver')}
+                />
+                {t(lang, 'roleDriver')}
+              </label>
+            </div>
+          </div>
 
-              {role === 'driver' && (
-                <div className="auth-field">
-                  <label className="auth-label">
-                    {t(lang, 'carTypeLabel')}
-                  </label>
-                  <select
-                    className="auth-input"
-                    value={carType}
-                    onChange={e => setCarType(e.target.value)}
-                  >
-                    <option value="">
-                      {t(lang, 'selectCarTypeHint')}
-                    </option>
-                    <option value="YELLOW">
-                      {t(lang, 'carTypeYellow')}
-                    </option>
-                    <option value="GREEN">
-                      {t(lang, 'carTypeGreen')}
-                    </option>
-                    <option value="FHV">
-                      {t(lang, 'carTypeFhv')}
-                    </option>
-                  </select>
-                </div>
-              )}
-            </>
+          {/* ✅ 只有「註冊 + 司機」才需要車種 */}
+          {tab === 'register' && role === 'driver' && (
+            <div className="auth-field">
+              <label className="auth-label">{t(lang, 'carTypeLabel')}</label>
+              <select className="auth-input" value={carType} onChange={e => setCarType(e.target.value)}>
+                <option value="">{t(lang, 'selectCarTypeHint')}</option>
+                <option value="YELLOW">{t(lang, 'carTypeYellow')}</option>
+                <option value="GREEN">{t(lang, 'carTypeGreen')}</option>
+                <option value="FHV">{t(lang, 'carTypeFhv')}</option>
+              </select>
+            </div>
           )}
 
           {/* 帳號 */}
           <div className="auth-field">
-            <label className="auth-label">
-              {t(lang, 'usernameLabel')}
-            </label>
+            <label className="auth-label">{t(lang, 'usernameLabel')}</label>
             <input
               className="auth-input"
               type="text"
@@ -239,9 +185,7 @@ export default function AuthPage({ lang, onBack, onRegister, onLogin }) {
 
           {/* 密碼 */}
           <div className="auth-field">
-            <label className="auth-label">
-              {t(lang, 'passwordLabel')}
-            </label>
+            <label className="auth-label">{t(lang, 'passwordLabel')}</label>
             <input
               className="auth-input"
               type="password"
@@ -251,15 +195,8 @@ export default function AuthPage({ lang, onBack, onRegister, onLogin }) {
             />
           </div>
 
-          {/* 送出按鈕 */}
-          <button
-            type="submit"
-            className="auth-submit-btn"
-            disabled={submitting}
-          >
-            {tab === 'login'
-              ? t(lang, 'login')
-              : t(lang, 'registerNow')}
+          <button type="submit" className="auth-submit-btn" disabled={submitting}>
+            {tab === 'login' ? t(lang, 'login') : t(lang, 'registerNow')}
           </button>
         </form>
       </div>
