@@ -326,7 +326,7 @@ export default function DriverPage({
     try {
       const res = await apiFetch('/api/dispatch-recommendations', {
         query: { lat, lng: lon, top_k: 3 },
-        timeoutMs: 20000,
+        timeoutMs: 360000,
       })
       if (!res.ok) throw new Error(`dispatch-recommendations ${res.status}`)
 
