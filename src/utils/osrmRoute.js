@@ -1,6 +1,6 @@
 // src/utils/osrmRoute.js
+import { apiFetch } from '../apiBase.js'
 
-// ===== 簡單快取：避免一直打 OSRM 造成超慢 =====
 const routeCache = new Map()
 const ROUTE_TTL_MS = 2 * 60 * 1000
 
@@ -10,7 +10,6 @@ function keyFromPoints(points) {
     .join('|')
 }
 
-// OSRM: points -> coords [[lat,lng],...], distKm
 async function fetchOsrm(points, { signal } = {}) {
   if (!Array.isArray(points) || points.length < 2) {
     throw new Error('Need at least 2 points')
@@ -22,46 +21,64 @@ async function fetchOsrm(points, { signal } = {}) {
     return hit.v
   }
 
-  const coordStr = points.map(p => `${p.lng},${p.lat}`).join(';')
-  const url =
-    `https://router.project-osrm.org/route/v1/driving/${coordStr}` +
-    `?overview=full&geometries=geojson`
+  let allCoords = []
+  let totalDist = 0
 
-  const res = await fetch(url, { signal })
-  const data = await res.json()
+  for (let i = 1; i < points.length; i++) {
+    const from = points[i - 1]
+    const to = points[i]
 
-  if (!data.routes || !data.routes.length) {
-    throw new Error('No OSRM route')
+    const res = await apiFetch('/api/route', {
+      timeoutMs: 20000,
+      signal,
+      query: {
+        fromLat: from.lat,
+        fromLng: from.lng,
+        toLat: to.lat,
+        toLng: to.lng,
+      },
+    })
+
+    if (!res.ok) throw new Error(`Route API error ${res.status}`)
+
+    const data = await res.json()
+    const coords = Array.isArray(data?.coords) ? data.coords : []
+    const dist = Number(data?.dist)
+
+    if (coords.length < 2) throw new Error('No route coords')
+
+    if (allCoords.length && coords.length) {
+      allCoords = allCoords.concat(coords.slice(1))
+    } else {
+      allCoords = coords
+    }
+
+    if (Number.isFinite(dist)) totalDist += dist
   }
 
-  const route = data.routes[0]
   const result = {
-    coords: route.geometry.coordinates.map(([lon, lat]) => [lat, lon]),
-    distKm: route.distance / 1000,
+    coords: allCoords,
+    distKm: totalDist,
   }
 
   routeCache.set(key, { t: Date.now(), v: result })
   return result
 }
 
-// 兼容你原本的兩點版本
 export async function getOsrmRoute(from, to, opts = {}) {
   return fetchOsrm([from, to], opts)
 }
 
-// ✅ 新增：多點（上車 -> stops... -> 目的地）
 export async function getOsrmRouteMulti(points, opts = {}) {
   return fetchOsrm(points, opts)
 }
 
-// 距離 -> 預估車資（USD）
 export function estimateFareUSD(distKm) {
   const base = 2.5
   const perKm = 1.5
   return base + perKm * Math.max(1, distKm)
 }
 
-// 顯示成 $（你原本寫法我保留，但建議之後改成英文函式名）
 export function 預估車資(usd) {
   return usd
 }

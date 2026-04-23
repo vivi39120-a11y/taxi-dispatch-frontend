@@ -368,16 +368,39 @@ function MapViewInitializer({ storageKey, streetViewMode, getInitialTarget }) {
 }
 
 // ====== OSRM ======
-async function fetchOsrmRoute(points, { signal } = {}) {
+async function fetchOsrmRoute(points, { signal, apiFetch } = {}) {
   if (!Array.isArray(points) || points.length < 2) return null
-  const coordStr = points.map(p => `${p.lng},${p.lat}`).join(';')
-  const url = `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson`
-  const res = await fetch(url, { signal })
-  if (!res.ok) throw new Error('OSRM error')
-  const data = await res.json()
-  const coords = data?.routes?.[0]?.geometry?.coordinates
-  if (!coords || coords.length < 2) throw new Error('OSRM no route')
-  return coords.map(([lng, lat]) => [lat, lng])
+
+  const f = apiFetch || defaultApiFetch
+  let allCoords = []
+
+  for (let i = 1; i < points.length; i++) {
+    const from = points[i - 1]
+    const to = points[i]
+
+    const res = await f('/api/route', {
+      timeoutMs: 20000,
+      signal,
+      query: {
+        fromLat: from.lat,
+        fromLng: from.lng,
+        toLat: to.lat,
+        toLng: to.lng,
+      },
+    })
+
+    if (!res.ok) throw new Error(`Route API error ${res.status}`)
+
+    const data = await res.json()
+    const coords = Array.isArray(data?.coords) ? data.coords : []
+
+    if (coords.length < 2) throw new Error('Route no coords')
+
+    if (allCoords.length) allCoords = allCoords.concat(coords.slice(1))
+    else allCoords = coords
+  }
+
+  return allCoords
 }
 
 // ====== Waypoints Builder ======
@@ -1590,8 +1613,7 @@ const hasTrackTarget = useMemo(() => {
         if (!wps || wps.length < 2) continue
 
         try {
-          let cs = await fetchOsrmRoute(wps)
-          if (cs && cs.length > 0 && o.dropoffLocation) {
+            let cs = await fetchOsrmRoute(wps, { apiFetch: useApiFetch })          if (cs && cs.length > 0 && o.dropoffLocation) {
             const lastPt = cs[cs.length - 1]
             const dropoff = [o.dropoffLocation.lat, o.dropoffLocation.lng]
             const dist = Math.sqrt(

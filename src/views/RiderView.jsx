@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import MapView from '../components/MapView.jsx'
 import OrderList from '../components/OrderList.jsx'
 import { t } from '../i18n'
+import { apiFetch } from '../apiBase.js'
 
 function normalizeGeocodeList(data) {
   if (!Array.isArray(data)) return []
@@ -349,13 +350,20 @@ const previewMarkers = useMemo(() => {
 }, [pickupLoc, dropoffLoc, previewStopsResolved])
 
   async function geocodeOnce(text) {
-    if (!text || !text.trim()) return null
-    const res = await fetch(`/api/geocode?q=${encodeURIComponent(text.trim())}`)
-    if (!res.ok) return null
-    const data = normalizeGeocodeList(await res.json().catch(() => []))
-    if (!data.length) return null
-    return { lat: data[0].lat, lng: data[0].lng, label: data[0].label }
-  }
+  if (!text || !text.trim()) return null
+
+  const res = await apiFetch('/api/geocode', {
+    query: { q: text.trim() },
+    timeoutMs: 10000,
+  })
+
+  if (!res.ok) return null
+
+  const data = normalizeGeocodeList(await res.json().catch(() => []))
+  if (!data.length) return null
+
+  return { lat: data[0].lat, lng: data[0].lng, label: data[0].label }
+}
 
   function distanceKm(a, b) {
     const toRad = d => (d * Math.PI) / 180
@@ -369,31 +377,70 @@ const previewMarkers = useMemo(() => {
     return R * c
   }
 
-  async function osrmRouteDistanceKm(points) {
-    if (!Array.isArray(points) || points.length < 2) return null
-    const coordStr = points.map(p => `${p.lng},${p.lat}`).join(';')
-    const url = `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=false`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error('OSRM error')
-    const data = await res.json()
-    if (!data.routes || !data.routes.length) throw new Error('OSRM no route')
-    return data.routes[0].distance / 1000
-  }
+ async function osrmRouteDistanceKm(points) {
+  if (!Array.isArray(points) || points.length < 2) return null
+
+  let total = 0
+
+  for (let i = 1; i < points.length; i++) {
+    const from = points[i - 1]
+    const to = points[i]
+
+    const res = await apiFetch('/api/route', {
+      timeoutMs: 20000,
+      query: {
+        fromLat: from.lat,
+        fromLng: from.lng,
+        toLat: to.lat,
+        toLng: to.lng,
+      },
+    })
+
+    if (!res.ok) throw new Error(`Route API error ${res.status}`)
+
+    const data = await res.json()
+    const dist = Number(data?.dist)
+    if (Number.isFinite(dist)) total += dist
+  }
+
+  return total
+}
+
 async function osrmRouteGeometry(points) {
   if (!Array.isArray(points) || points.length < 2) return null
 
-  const coordStr = points.map(p => `${p.lng},${p.lat}`).join(';')
-  const url = `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson`
+  let allCoords = []
 
-  const res = await fetch(url)
-  if (!res.ok) throw new Error('OSRM geometry error')
+  for (let i = 1; i < points.length; i++) {
+    const from = points[i - 1]
+    const to = points[i]
 
-  const data = await res.json()
-  const coords = data?.routes?.[0]?.geometry?.coordinates
-  if (!coords || coords.length < 2) throw new Error('OSRM geometry no route')
+    const res = await apiFetch('/api/route', {
+      timeoutMs: 20000,
+      query: {
+        fromLat: from.lat,
+        fromLng: from.lng,
+        toLat: to.lat,
+        toLng: to.lng,
+      },
+    })
 
-  return coords.map(([lng, lat]) => ({ lat, lng }))
+    if (!res.ok) throw new Error(`Route API error ${res.status}`)
+
+    const data = await res.json()
+    const coords = Array.isArray(data?.coords) ? data.coords : []
+
+    if (coords.length < 2) throw new Error('Route geometry no coords')
+
+    const objCoords = coords.map(([lat, lng]) => ({ lat, lng }))
+
+    if (allCoords.length) allCoords = allCoords.concat(objCoords.slice(1))
+    else allCoords = objCoords
+  }
+
+  return allCoords
 }
+
   useEffect(() => {
     if (composerLocked) return
     if (pickupLocked || !pickupDirty) {
@@ -408,10 +455,14 @@ async function osrmRouteGeometry(points) {
     const controller = new AbortController()
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/geocode?q=${encodeURIComponent(pickupText.trim())}`, { signal: controller.signal })
-        if (!res.ok) return
-        const data = normalizeGeocodeList(await res.json().catch(() => []))
-        setPickupSuggestions(data)
+        const res = await apiFetch('/api/geocode', {
+          query: { q: pickupText.trim() },
+          timeoutMs: 10000,
+          signal: controller.signal,
+        })
+        if (!res.ok) return
+        const data = normalizeGeocodeList(await res.json().catch(() => []))
+        setPickupSuggestions(data)
       } catch {}
     }, 250)
 
@@ -435,10 +486,14 @@ async function osrmRouteGeometry(points) {
     const controller = new AbortController()
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/geocode?q=${encodeURIComponent(dropoffText.trim())}`, { signal: controller.signal })
-        if (!res.ok) return
-        const data = normalizeGeocodeList(await res.json().catch(() => []))
-        setDropoffSuggestions(data)
+        const res = await apiFetch('/api/geocode', {
+            query: { q: dropoffText.trim() },
+            timeoutMs: 10000,
+            signal: controller.signal,
+          })
+          if (!res.ok) return
+          const data = normalizeGeocodeList(await res.json().catch(() => []))
+          setDropoffSuggestions(data)
       } catch {}
     }, 250)
 
@@ -509,9 +564,13 @@ async function osrmRouteGeometry(points) {
     const controller = new AbortController()
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/geocode?q=${encodeURIComponent(trimmed)}`, { signal: controller.signal })
-        if (!res.ok) return
-        const data = normalizeGeocodeList(await res.json().catch(() => []))
+        const res = await apiFetch('/api/geocode', {
+          query: { q: trimmed },
+          timeoutMs: 10000,
+          signal: controller.signal,
+        })
+        if (!res.ok) return
+        const data = normalizeGeocodeList(await res.json().catch(() => []))
 
         setStops(prev => {
           const copy = [...prev]

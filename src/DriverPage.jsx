@@ -220,7 +220,7 @@ async function getRoute(fromLat, fromLon, toLat, toLon) {
         toLat,
         toLng: toLon,
       },
-      timeoutMs: 15000,
+      timeoutMs: 30000,
     })
 
     if (!res.ok) {

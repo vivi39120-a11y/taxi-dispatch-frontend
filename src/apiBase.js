@@ -10,6 +10,7 @@ const MODEL_API_PATHS = new Set([
   '/api/zone-hotspots',
   '/api/dispatch-recommendations',
   '/api/route',
+  '/api/geocode',
 ])
 
 function normalizePath(path = '') {
