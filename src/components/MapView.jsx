@@ -1613,7 +1613,9 @@ const hasTrackTarget = useMemo(() => {
         if (!wps || wps.length < 2) continue
 
         try {
-            let cs = await fetchOsrmRoute(wps, { apiFetch: useApiFetch })          if (cs && cs.length > 0 && o.dropoffLocation) {
+            let cs = await fetchOsrmRoute(wps, { apiFetch: useApiFetch })
+
+if (cs && cs.length > 0 && o.dropoffLocation) {
             const lastPt = cs[cs.length - 1]
             const dropoff = [o.dropoffLocation.lat, o.dropoffLocation.lng]
             const dist = Math.sqrt(
