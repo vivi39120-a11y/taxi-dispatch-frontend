@@ -653,9 +653,8 @@ export default function App() {
       if (du && !driverUser) setDriverUser(du)
       if (did != null && currentDriverId == null) setCurrentDriverId(did)
 
-      // 乘客補齊後端狀態（login / auto register）
-      const pCred = readPassengerCred()
-      if (mode !== 'driver' && pCred?.username && pCred.password) {
+const pCred = readPassengerCred()
+if (mode !== 'driver' && pCred?.username && pCred.password) {
         try {
           const res = await apiFetch('/api/login', {
             method: 'POST',
