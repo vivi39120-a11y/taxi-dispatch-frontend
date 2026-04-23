@@ -27,6 +27,9 @@ const ICON_HEADING_OFFSET_DEG = 0
 const ORDER_START_PREFIX = 'orderStart:'
 const ORDER_ROUTE_PREFIX = 'orderRoute:'
 const SUMO_TRACE_URL = import.meta.env?.VITE_SUMO_TRACE_URL || '/sumo_traces/demo.json'
+const HOTSPOT_MOVE_TASK_KEY = 'hotspotMoveTaskV1'
+const HOTSPOT_MOVE_EVT = 'hotspotMoveTaskChanged'
+const DRIVER_LIVE_STATE_PREFIX = 'driverLiveState:'
 
 // ====== 物理參數（fallback physics sim 用） ======
 const CAR_ACCEL = 3.5
@@ -48,7 +51,7 @@ const PLAYBACK_EVT = 'simPlaybackFactorChanged'
 
 function readPlaybackFactor() {
   try {
-    const v = Number(localStorage.getItem(PLAYBACK_LS_KEY) || '1')
+    const v = Number(localStorage.getItem(PLAYBACK_LS_KEY) || '100')
     return Number.isFinite(v) && v > 0 ? v : 1
   } catch {
     return 1
@@ -103,6 +106,19 @@ function sameId(a, b) {
   const B = Number(b)
   return Number.isFinite(A) && Number.isFinite(B) && A === B
 }
+
+function isValidLatLng(ll) {
+  if (!ll) return false
+  const lat = Number(ll.lat)
+  const lng = Number(ll.lng)
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false
+  if (Math.abs(lat) < 1e-9 && Math.abs(lng) < 1e-9) return false
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false
+
+  return true
+}
+
 function isActiveStatus(status) {
   return ACTIVE_STATUS_SET.has(String(status || '').toLowerCase())
 }
@@ -208,6 +224,46 @@ function writeOrderRoute(orderKey, coords) {
   } catch {}
 }
 
+function readHotspotMoveTask() {
+  try {
+    const raw = localStorage.getItem(HOTSPOT_MOVE_TASK_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function emitHotspotMoveTaskChanged(task) {
+  try {
+    window.dispatchEvent(new CustomEvent(HOTSPOT_MOVE_EVT, { detail: { task } }))
+  } catch {}
+}
+
+function clearHotspotMoveTask(taskId = null) {
+  try {
+    const cur = readHotspotMoveTask()
+    if (taskId != null && cur && Number(cur.taskId) !== Number(taskId)) return
+    localStorage.removeItem(HOTSPOT_MOVE_TASK_KEY)
+  } catch {}
+  emitHotspotMoveTaskChanged(null)
+}
+
+function writeDriverLiveState(driverId, payload) {
+  try {
+    if (driverId == null || !payload) return
+    localStorage.setItem(
+      `${DRIVER_LIVE_STATE_PREFIX}${driverId}`,
+      JSON.stringify({
+        lat: Number(payload.lat),
+        lng: Number(payload.lng),
+        heading: Number(payload.heading ?? 0),
+        speedKph: Number(payload.speedKph ?? 0),
+        ts: Date.now(),
+      })
+    )
+  } catch {}
+}
+
 // ====== Driver Click Handler ======
 function DriverClickHandler({ enabled, driverId, onLocationChange, apiFetch }) {
   useMapEvents({
@@ -283,25 +339,29 @@ function MapViewInitializer({ storageKey, streetViewMode, getInitialTarget }) {
     try {
       if (streetViewMode) {
         const target = getInitialTarget?.()
-        if (
-          target &&
-          Number.isFinite(Number(target.lat)) &&
-          Number.isFinite(Number(target.lng))
-        ) {
-          map.setView([target.lat, target.lng], 18, { animate: false })
+        if (isValidLatLng(target)) {
+          map.setView([Number(target.lat), Number(target.lng)], 18, { animate: false })
         } else {
-          map.setView(DEFAULT_CENTER, 18, { animate: false })
+          map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate: false })
         }
         return
       }
 
       const s = readMapState(storageKey)
-      if (s && Number.isFinite(s.lat) && Number.isFinite(s.lng) && Number.isFinite(s.zoom)) {
-        map.setView([s.lat, s.lng], s.zoom, { animate: false })
+      if (
+        s &&
+        Number.isFinite(Number(s.lat)) &&
+        Number.isFinite(Number(s.lng)) &&
+        Number.isFinite(Number(s.zoom)) &&
+        !(Math.abs(Number(s.lat)) < 1e-9 && Math.abs(Number(s.lng)) < 1e-9)
+      ) {
+        map.setView([Number(s.lat), Number(s.lng)], Number(s.zoom), { animate: false })
       } else {
         map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate: false })
       }
-    } catch {}
+    } catch {
+      map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate: false })
+    }
   }, [storageKey, streetViewMode, map, getInitialTarget])
 
   return null
@@ -353,7 +413,7 @@ function buildCarWaypoints(order, mode, drivers, currentDriverId, frozenStartPos
       lat: Number(frozenStartPos.lat),
       lng: Number(frozenStartPos.lng),
     })
-  } else if (active && visibleToThisView && driverId != null) {
+  } else if (visibleToThisView && driverId != null) {
     const liveDriver = drivers.find(x => sameId(x.id, driverId))
     if (
       liveDriver &&
@@ -364,8 +424,10 @@ function buildCarWaypoints(order, mode, drivers, currentDriverId, frozenStartPos
         lat: Number(liveDriver.lat),
         lng: Number(liveDriver.lng),
       })
-    } else {
+    } else if (active) {
       waypoints.push({ lat: pickup.lat, lng: pickup.lng })
+    } else {
+      return null
     }
   } else {
     return null
@@ -377,7 +439,7 @@ function buildCarWaypoints(order, mode, drivers, currentDriverId, frozenStartPos
 
   for (const s of stops) {
     const lat = Number(s?.lat)
-    const lng = Number(s?.lng)
+    const lng = Number(s?.lng ?? s?.lon)
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
 
     const type = String(s?.type || '').toLowerCase()
@@ -537,7 +599,6 @@ function resolveSumoVehicleId(json, order) {
     if (v[id]?.points?.length) return id
   }
 
-  // 只有 trace 裡本來就只有一台車時，才安全地直接使用
   if (ids.length === 1 && v[ids[0]]?.points?.length) {
     return ids[0]
   }
@@ -650,8 +711,7 @@ function makeStopNumberIcon(n) {
 }
 
 // ====== Controls ======
-function RecenterControl({ onClick, t, lang, getTargetLatLng }) {
-  const map = useMap()
+function RecenterControl({ onClick, t, lang }) {
   return (
     <div
       className="leaflet-bottom leaflet-right"
@@ -662,12 +722,8 @@ function RecenterControl({ onClick, t, lang, getTargetLatLng }) {
           onClick={(e) => {
             e.stopPropagation()
             e.preventDefault()
-            const ll = getTargetLatLng?.()
-            if (ll?.lat != null && ll?.lng != null) {
-              map.setView([ll.lat, ll.lng], 18, { animate: false })
-            } else {
-              map.setView(DEFAULT_CENTER, 18, { animate: false })
-            }
+
+            // ✅ 只重新啟用跟車視角
             onClick?.()
           }}
           style={{
@@ -685,18 +741,32 @@ function RecenterControl({ onClick, t, lang, getTargetLatLng }) {
             fontSize: '14px',
           }}
         >
-          <span style={{ fontSize: '18px' }}>⌖</span> {t(lang, 'recenter') || '回到目前位置'}
+          <span style={{ fontSize: '18px' }}>⌖</span> {t(lang, 'recenter')}
         </button>
       </div>
     </div>
   )
 }
 
-function ReplaySpeedControl({ factor, onChange, debugInfo }) {
-  const opts = [0.5, 1, 2, 4, 8]
+function ReplaySpeedControl({ factor, onChange, debugInfo, autoOpen = false, autoOpenKey = null, lang }) {
+  const [collapsed, setCollapsed] = useState(true)
+  const [hasAutoOpened, setHasAutoOpened] = useState(false)
+
+  const opts = [1, 2, 4, 8, 12, 16]
   const speed = Number(debugInfo?.speed ?? 0)
   const sumoTime = Number(debugInfo?.sumoTime ?? 0)
   const isSumo = Boolean(debugInfo?.isSumo)
+
+  useEffect(() => {
+    setHasAutoOpened(false)
+  }, [autoOpenKey])
+
+  useEffect(() => {
+    if (autoOpen && !hasAutoOpened) {
+      setCollapsed(false)
+      setHasAutoOpened(true)
+    }
+  }, [autoOpen, hasAutoOpened])
 
   return (
     <div
@@ -713,61 +783,107 @@ function ReplaySpeedControl({ factor, onChange, debugInfo }) {
         style={{
           pointerEvents: 'auto',
           background: 'rgba(255,255,255,0.92)',
-          padding: '8px 10px',
-          borderRadius: '10px',
+          padding: collapsed ? '8px 10px' : '10px 12px',
+          borderRadius: '12px',
           boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
           fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
           fontSize: '12px',
-          minWidth: 220,
+          minWidth: collapsed ? 120 : 220,
+          transition: 'all 0.25s ease',
         }}
       >
-        <div style={{ fontWeight: 800, marginBottom: 6 }}>Replay Speed</div>
-
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {opts.map(v => {
-            const active = Math.abs(v - Number(factor || 1)) < 1e-9
-            return (
-              <button
-                key={v}
-                type="button"
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onChange?.(v) }}
-                style={{
-                  padding: '6px 10px',
-                  borderRadius: 999,
-                  border: active ? '2px solid rgba(0,0,0,0.65)' : '1px solid rgba(0,0,0,0.2)',
-                  background: active ? '#111' : '#fff',
-                  color: active ? '#fff' : '#111',
-                  cursor: 'pointer',
-                  fontWeight: 800,
-                }}
-              >
-                {v}x
-              </button>
-            )
-          })}
-        </div>
-
-        <div style={{ marginTop: 6, opacity: 0.75 }}>
-          Current: <b>{Number(factor || 1).toFixed(2)}x</b>
-        </div>
-
         <div
           style={{
-            marginTop: 10,
-            paddingTop: 8,
-            borderTop: '1px solid rgba(0,0,0,0.12)',
-            fontFamily: 'monospace',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 10,
           }}
         >
-          <div><strong>TRACE</strong> <span style={{ opacity: 0.75 }}>REPLAY</span></div>
-          <div>
-            Source: <span style={{ fontWeight: 800, color: isSumo ? '#0a0' : '#c60' }}>
-              {isSumo ? 'SUMO' : 'PHYSICS'}
-            </span>
-          </div>
-          <div>Speed: {Math.round(speed)} km/h</div>
-          <div>t: {Number.isFinite(sumoTime) ? sumoTime.toFixed(2) : '0.00'} s</div>
+          <div style={{ fontWeight: 800 }}>{t(lang, 'replaySpeedTitle')}</div>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setCollapsed(v => !v)
+            }}
+            style={{
+              border: '1px solid rgba(0,0,0,0.15)',
+              background: '#fff',
+              borderRadius: '999px',
+              padding: '4px 10px',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '12px',
+            }}
+            aria-label={collapsed ? t(lang, 'expand') : t(lang, 'collapse')}
+            title={collapsed ? t(lang, 'expand') : t(lang, 'collapse')}
+          >
+            {collapsed ? t(lang, 'expand') : t(lang, 'collapse')}
+          </button>
         </div>
+
+        {!collapsed && (
+          <>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+              {opts.map(v => {
+                const active = Math.abs(v - Number(factor || 1)) < 1e-9
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      onChange?.(v)
+                    }}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 999,
+                      border: active ? '2px solid rgba(0,0,0,0.65)' : '1px solid rgba(0,0,0,0.2)',
+                      background: active ? '#111' : '#fff',
+                      color: active ? '#fff' : '#111',
+                      cursor: 'pointer',
+                      fontWeight: 800,
+                    }}
+                    aria-label={`${v}x`}
+                    title={`${v}x`}
+                  >
+                    {v}x
+                  </button>
+                )
+              })}
+            </div>
+
+            <div style={{ marginTop: 6, opacity: 0.75 }}>
+              {t(lang, 'replaySpeedCurrent')} <b>{Number(factor || 1).toFixed(2)}x</b>
+            </div>
+
+            <div
+              style={{
+                marginTop: 10,
+                paddingTop: 8,
+                borderTop: '1px solid rgba(0,0,0,0.12)',
+                fontFamily: 'monospace',
+              }}
+            >
+              <div>
+                <strong>{t(lang, 'traceLabel')}</strong>{' '}
+                <span style={{ opacity: 0.75 }}>{t(lang, 'replayLabel')}</span>
+              </div>
+              <div>
+                {t(lang, 'sourceLabel')}{' '}
+                <span style={{ fontWeight: 800, color: isSumo ? '#0a0' : '#c60' }}>
+                  {isSumo ? t(lang, 'sumoLabel') : t(lang, 'physicsLabel')}
+                </span>
+              </div>
+              <div>{t(lang, 'speedLabel')} {Math.round(speed)} {t(lang, 'speedUnit')}</div>
+              <div>{t(lang, 'timeShortLabel')} {Number.isFinite(sumoTime) ? sumoTime.toFixed(2) : '0.00'} {t(lang, 'timeSecondUnit')}</div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -946,7 +1062,7 @@ function CarRuntimeLayer({
     }
 
     const pts = pickVehiclePoints(sumoJson, { order: orderRef.current })
-profileRef.current = pts ? buildSpeedProfile(pts) : null
+    profileRef.current = pts ? buildSpeedProfile(pts) : null
   }, [sumoJson, order?.id])
 
   useEffect(() => {
@@ -1071,6 +1187,11 @@ profileRef.current = pts ? buildSpeedProfile(pts) : null
         const posData = { lat, lng, heading, speedKph }
         lastCarPosRef.current.set(oid, posData)
         stashCarPos(oid, posData)
+
+        const movingDriverId = getOrderDriverId(orderRef.current)
+        if (movingDriverId != null) {
+          writeDriverLiveState(movingDriverId, posData)
+        }
       }
 
       if (markerRef.current && lat !== 0) {
@@ -1177,134 +1298,124 @@ export default function MapView({
     return currentDriverId != null && did != null && sameId(did, currentDriverId)
   }, [previewEnabled, orders, isDriverMode, currentDriverId])
 
-  // ✅ 修正：
-// 跟車不只 streetViewMode，要真正吃 followActiveCar
-const [isFollowing, setIsFollowing] = useState(true)
+  const [isFollowing, setIsFollowing] = useState(true)
 
-const [tileUrl, setTileUrl] = useState('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png')
+  const [tileUrl, setTileUrl] = useState('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png')
 
-const cumRef = useRef(new Map())
-const lastCarPosRef = useRef(new Map())
-const latestCarStateRef = useRef(new Map())
-const arrivedOnceRef = useRef(new Set())
-const completedOnceRef = useRef(new Set())
+  const cumRef = useRef(new Map())
+  const lastCarPosRef = useRef(new Map())
+  const latestCarStateRef = useRef(new Map())
+  const arrivedOnceRef = useRef(new Set())
+  const completedOnceRef = useRef(new Set())
 
-const stashCarPos = useCallback((oid, val) => {
-  latestCarStateRef.current.set(oid, { ...val, ts: Date.now() })
-  onCarPosChange?.(oid, val)
-}, [onCarPosChange])
+      const stashCarPos = useCallback((oid, val) => {
+    latestCarStateRef.current.set(oid, { ...val, ts: Date.now() })
+    onCarPosChange?.(oid, val)
+  }, [onCarPosChange])
 
-const runtimeOrders = useMemo(() => {
-  const result = []
-  const seenDriverIds = new Set()
+  const runtimeOrders = useMemo(() => {
+    const result = []
+    const seenDriverIds = new Set()
 
-  const sorted = [...orders].sort((a, b) => {
-    const ta = Date.parse(a?.updatedAt || a?.updated_at || a?.createdAt || a?.created_at || 0) || 0
-    const tb = Date.parse(b?.updatedAt || b?.updated_at || b?.createdAt || b?.created_at || 0) || 0
-    if (ta !== tb) return tb - ta
-    return Number(b?.id || 0) - Number(a?.id || 0)
-  })
+    const sorted = [...orders].sort((a, b) => {
+      const ta = Date.parse(a?.updatedAt || a?.updated_at || a?.createdAt || a?.created_at || 0) || 0
+      const tb = Date.parse(b?.updatedAt || b?.updated_at || b?.createdAt || b?.created_at || 0) || 0
+      if (ta !== tb) return tb - ta
+      return Number(b?.id || 0) - Number(a?.id || 0)
+    })
 
-  for (const o of sorted) {
-    if (!o?.id) continue
-    if (completedOrderIds?.has?.(o.id)) continue
+    for (const o of sorted) {
+      if (!o?.id) continue
+      if (completedOrderIds?.has?.(o.id)) continue
 
-    const driverId = getOrderDriverId(o)
+      const driverId = getOrderDriverId(o)
 
-    // 沒派司機的不跑 runtime car
-    if (driverId == null) continue
+      if (driverId == null) continue
+      if (!isActiveStatus(o?.status)) continue
+      if (mode === 'passenger' && !canShowPassengerRoute(o)) continue
 
-    // 只保留進行中訂單
-    if (!isActiveStatus(o?.status)) continue
+      if (
+        mode === 'driver' &&
+        currentDriverId != null &&
+        !sameId(driverId, currentDriverId)
+      ) {
+        continue
+      }
 
-    // 乘客端未真正派車前，不要跑 runtime 車
-    if (mode === 'passenger' && !canShowPassengerRoute(o)) continue
+      const key = Number(driverId)
+      if (seenDriverIds.has(key)) continue
+      seenDriverIds.add(key)
 
-    // 司機端只顯示自己的單
-    if (
-      mode === 'driver' &&
-      currentDriverId != null &&
-      !sameId(driverId, currentDriverId)
-    ) {
-      continue
+      result.push(o)
     }
 
-    // 每個司機只保留當下那張進行中的單
-    const key = Number(driverId)
-    if (seenDriverIds.has(key)) continue
-    seenDriverIds.add(key)
+    return result
+  }, [orders, completedOrderIds, mode, currentDriverId])
 
-    result.push(o)
-  }
+  const frozenStartPosByOrderId = useMemo(() => {
+    const out = new Map()
 
-  return result
-}, [orders, completedOrderIds, mode, currentDriverId])
+    for (const o of orders) {
+      const orderKey = getOrderKey(o)
+      if (!orderKey) continue
 
+      let start = readOrderStart(orderKey)
 
-const frozenStartPosByOrderId = useMemo(() => {
-  const out = new Map()
+      if (
+        !start ||
+        !Number.isFinite(Number(start.lat)) ||
+        !Number.isFinite(Number(start.lng))
+      ) {
+        const drvId = getOrderDriverId(o)
+        const hasAssignedDriver = drvId != null && isActiveStatus(o?.status)
+        if (!hasAssignedDriver) continue
 
-  for (const o of orders) {
-    const orderKey = getOrderKey(o)
-    if (!orderKey) continue
-
-    let start = readOrderStart(orderKey)
-
-    if (
-      !start ||
-      !Number.isFinite(Number(start.lat)) ||
-      !Number.isFinite(Number(start.lng))
-    ) {
-      const drvId = getOrderDriverId(o)
-      const hasAssignedDriver = drvId != null && isActiveStatus(o?.status)
-      if (!hasAssignedDriver) continue
-
-      const livePersisted =
-        usePersistedDriverLoc && drvId != null
-          ? (() => {
-              try {
-                const raw = localStorage.getItem(`driverLoc:${drvId}`)
-                if (!raw) return null
-                const parsed = JSON.parse(raw)
-                const lat = Number(parsed?.lat)
-                const lng = Number(parsed?.lng)
-                if (Number.isFinite(lat) && Number.isFinite(lng)) {
-                  return { lat, lng }
+        const livePersisted =
+          usePersistedDriverLoc && drvId != null
+            ? (() => {
+                try {
+                  const raw = localStorage.getItem(`driverLoc:${drvId}`)
+                  if (!raw) return null
+                  const parsed = JSON.parse(raw)
+                  const lat = Number(parsed?.lat)
+                  const lng = Number(parsed?.lng)
+                  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    return { lat, lng }
+                  }
+                  return null
+                } catch {
+                  return null
                 }
-                return null
-              } catch {
-                return null
-              }
-            })()
-          : null
+              })()
+            : null
 
-      if (livePersisted) {
-        start = { lat: Number(livePersisted.lat), lng: Number(livePersisted.lng) }
-        writeOrderStartOnce(orderKey, start)
-      } else {
-        const drv = drivers.find(d => sameId(d.id, drvId))
-        if (
-          drv &&
-          Number.isFinite(Number(drv.lat)) &&
-          Number.isFinite(Number(drv.lng))
-        ) {
-          start = { lat: Number(drv.lat), lng: Number(drv.lng) }
+        if (livePersisted) {
+          start = { lat: Number(livePersisted.lat), lng: Number(livePersisted.lng) }
           writeOrderStartOnce(orderKey, start)
+        } else {
+          const drv = drivers.find(d => sameId(d.id, drvId))
+          if (
+            drv &&
+            Number.isFinite(Number(drv.lat)) &&
+            Number.isFinite(Number(drv.lng))
+          ) {
+            start = { lat: Number(drv.lat), lng: Number(drv.lng) }
+            writeOrderStartOnce(orderKey, start)
+          }
         }
+      }
+
+      if (
+        start &&
+        Number.isFinite(Number(start.lat)) &&
+        Number.isFinite(Number(start.lng))
+      ) {
+        out.set(o.id, start)
       }
     }
 
-    if (
-      start &&
-      Number.isFinite(Number(start.lat)) &&
-      Number.isFinite(Number(start.lng))
-    ) {
-      out.set(o.id, start)
-    }
-  }
-
-  return out
-}, [orders, drivers, usePersistedDriverLoc])
+    return out
+  }, [orders, drivers, usePersistedDriverLoc])
 
 const hasTrackTarget = useMemo(() => {
   if (runtimeOrders.length > 0) return true
@@ -1320,53 +1431,61 @@ const hasTrackTarget = useMemo(() => {
   )
 }, [runtimeOrders, orders, frozenStartPosByOrderId])
 
-useEffect(() => {
-  const canFollow = !previewEnabled && (streetViewMode || (followActiveCar && hasTrackTarget))
-  if (canFollow) setIsFollowing(true)
-}, [streetViewMode, followActiveCar, hasTrackTarget, previewEnabled])
+  useEffect(() => {
+    const canFollow = !previewEnabled && (streetViewMode || (followActiveCar && hasTrackTarget))
+    if (canFollow) setIsFollowing(true)
+  }, [streetViewMode, followActiveCar, hasTrackTarget, previewEnabled])
 
-const shouldFollow = useMemo(() => {
-  if (!isFollowing) return false
-  if (previewEnabled) return false
-  return Boolean(streetViewMode || (followActiveCar && hasTrackTarget))
-}, [isFollowing, streetViewMode, followActiveCar, hasTrackTarget, previewEnabled])
+  const shouldFollow = useMemo(() => {
+    if (!isFollowing) return false
+    if (previewEnabled) return false
+    return Boolean(streetViewMode || (followActiveCar && hasTrackTarget))
+  }, [isFollowing, streetViewMode, followActiveCar, hasTrackTarget, previewEnabled])
 
-const storageKey = mapStateKey({ mode, driverId: currentDriverId, previewEnabled })
+  const storageKey = mapStateKey({ mode, driverId: currentDriverId, previewEnabled })
 
-const getActiveCarState = useCallback(() => {
-  const active = runtimeOrders[0] || orders?.[0]
-  if (!active?.id) return null
+  const getActiveCarState = useCallback(() => {
+    const active = runtimeOrders[0] || orders?.[0]
+    if (!active?.id) return null
 
-  const live = latestCarStateRef.current.get(active.id)
-  if (live) return live
-
-  const frozenStart = frozenStartPosByOrderId.get(active.id)
-  if (
-    frozenStart &&
-    Number.isFinite(Number(frozenStart.lat)) &&
-    Number.isFinite(Number(frozenStart.lng))
-  ) {
-    return {
-      lat: Number(frozenStart.lat),
-      lng: Number(frozenStart.lng),
-      heading: 0,
-      speedKph: 0,
+    const live = latestCarStateRef.current.get(active.id)
+    if (isValidLatLng(live)) {
+      return {
+        ...live,
+        lat: Number(live.lat),
+        lng: Number(live.lng),
+      }
     }
-  }
 
-  return null
-}, [runtimeOrders, orders, frozenStartPosByOrderId])
+    const frozenStart = frozenStartPosByOrderId.get(active.id)
+    if (isValidLatLng(frozenStart)) {
+      return {
+        lat: Number(frozenStart.lat),
+        lng: Number(frozenStart.lng),
+        heading: 0,
+        speedKph: 0,
+      }
+    }
 
-const handleRecenter = useCallback(() => {
-  setIsFollowing(true)
-}, [])
+    return null
+  }, [runtimeOrders, orders, frozenStartPosByOrderId])
 
-  // ✅ 修正：
-  // 完成訂單後：
-  // 1. driver location 寫回終點
-  // 2. 下一張訂單若使用新 orderKey，會直接吃最新 driverLoc
-  // 3. 當前這張訂單自己的 frozen start 也更新為最後位置，避免畫面回彈
-  const handleLocalOrderCompleted = useCallback((oid, lastPos) => {
+  const handleRecenter = useCallback(() => {
+    setIsFollowing(true)
+  }, [])
+  const activeTrackedOrder = runtimeOrders[0] || null
+
+  const shouldAutoOpenReplayCard = useMemo(() => {
+    return Boolean(
+      shouldFollow &&
+      activeTrackedOrder?.id != null &&
+      mode === 'driver'
+    )
+  }, [shouldFollow, activeTrackedOrder, mode])
+
+  const replayCardAutoOpenKey = activeTrackedOrder?.id ?? null
+
+    const handleLocalOrderCompleted = useCallback((oid, lastPos) => {
     const order = orders.find(o => o.id === oid)
     const drvId = getOrderDriverId(order)
     const orderKey = getOrderKey(order)
@@ -1393,6 +1512,8 @@ const handleRecenter = useCallback(() => {
         }))
       } catch {}
 
+      writeDriverLiveState(drvId, payload)
+
       if (orderKey) {
         writeOrderStart(orderKey, { lat: payload.lat, lng: payload.lng })
       }
@@ -1405,16 +1526,35 @@ const handleRecenter = useCallback(() => {
       }).catch(() => {})
     }
 
+    if (order?._isHotspotMove) {
+      clearHotspotMoveTask(order?._hotspotTaskId)
+
+      try {
+        if (orderKey) {
+          localStorage.removeItem(simKey(orderKey))
+          localStorage.removeItem(`${ORDER_START_PREFIX}${orderKey}`)
+          localStorage.removeItem(`${ORDER_ROUTE_PREFIX}${orderKey}`)
+        }
+      } catch {}
+
+      return
+    }
+
     onOrderCompleted?.(oid)
   }, [orders, onDriverLocationChange, apiFetch, onOrderCompleted])
 
-  useEffect(() => {
+   useEffect(() => {
     let cancelled = false
 
     async function load() {
       const newRoutes = {}
 
-      for (const o of orders) {
+      const targetOrders =
+        mode === 'passenger'
+          ? (orders.length > 0 ? [orders[0]] : [])
+          : orders
+
+      for (const o of targetOrders) {
         const orderKey = getOrderKey(o)
         const driverId = getOrderDriverId(o)
         const frozenStart = frozenStartPosByOrderId.get(o.id) || null
@@ -1427,6 +1567,13 @@ const handleRecenter = useCallback(() => {
             cumRef.current.set(o.id, buildCumDist(sharedRoute))
             continue
           }
+        }
+
+        if (Array.isArray(o?._prebuiltRoute) && o._prebuiltRoute.length >= 2) {
+          const cs = o._prebuiltRoute.map(p => [Number(p[0]), Number(p[1])])
+          newRoutes[o.id] = cs
+          cumRef.current.set(o.id, buildCumDist(cs))
+          continue
         }
 
         let wps = null
@@ -1473,7 +1620,8 @@ const handleRecenter = useCallback(() => {
       cancelled = true
     }
   }, [orders, mode, currentDriverId, drivers, frozenStartPosByOrderId])
-
+  
+  
   useEffect(() => {
     orders.forEach(o => {
       const k = getOrderKey(o)
@@ -1518,18 +1666,18 @@ const handleRecenter = useCallback(() => {
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <MapContainer
-  center={DEFAULT_CENTER}
-  zoom={shouldFollow ? 18 : DEFAULT_ZOOM}
-  style={{ width: '100%', height: '100%' }}
-  zoomControl={!shouldFollow}
-  maxZoom={18}
->
+        center={DEFAULT_CENTER}
+        zoom={shouldFollow ? 18 : DEFAULT_ZOOM}
+        style={{ width: '100%', height: '100%' }}
+        zoomControl={!shouldFollow}
+        maxZoom={18}
+      >
         <MapSizeFixer />
-<MapViewInitializer
-  storageKey={storageKey}
-  streetViewMode={shouldFollow}
-  getInitialTarget={getActiveCarState}
-/>
+        <MapViewInitializer
+          storageKey={storageKey}
+          streetViewMode={shouldFollow}
+          getInitialTarget={getActiveCarState}
+        />
         <MapStateTracker
           storageKey={storageKey}
           disabled={shouldFollow}
@@ -1554,13 +1702,15 @@ const handleRecenter = useCallback(() => {
           onClick={handleRecenter}
           t={t}
           lang={lang}
-          getTargetLatLng={() => getActiveCarState?.()}
         />
 
         <ReplaySpeedControl
           factor={playbackFactor}
           onChange={setPlaybackFactor}
           debugInfo={debugInfo}
+          autoOpen={shouldAutoOpenReplayCard}
+          autoOpenKey={replayCardAutoOpenKey}
+          lang={lang}
         />
 
         {isDriverMode && currentDriverId && (
@@ -1661,8 +1811,12 @@ const handleRecenter = useCallback(() => {
                   <Polyline positions={visualRoutes[o.id]} pathOptions={{ color: '#999', weight: 5 }} />
                 )}
 
-                {o.pickupLocation && <Marker position={[o.pickupLocation.lat, o.pickupLocation.lng]} icon={passengerIcon} />}
-                {o.dropoffLocation && <Marker position={[o.dropoffLocation.lat, o.dropoffLocation.lng]} icon={dropoffIcon} />}
+                {!o._hidePickupMarker && o.pickupLocation && (
+                  <Marker position={[o.pickupLocation.lat, o.pickupLocation.lng]} icon={passengerIcon} />
+                )}
+                {!o._hideDropoffMarker && o.dropoffLocation && (
+                  <Marker position={[o.dropoffLocation.lat, o.dropoffLocation.lng]} icon={dropoffIcon} />
+                )}
 
                 {(stopPinsByOrderId.get(o.id) || []).map(p => (
                   <Marker
@@ -1722,4 +1876,3 @@ const handleRecenter = useCallback(() => {
 }
 
 export { usePlaybackFactorSync, readPlaybackFactor, writePlaybackFactor, PLAYBACK_LS_KEY }
-

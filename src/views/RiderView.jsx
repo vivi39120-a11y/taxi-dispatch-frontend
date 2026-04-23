@@ -88,7 +88,7 @@ export default function RiderView({
 
   const [composerLocked, setComposerLocked] = useState(false)
   const [composeMode, setComposeMode] = useState(false)
-
+  const [panelCollapsed, setPanelCollapsed] = useState(false)
   const stopControllersRef = useRef({})
 
   useEffect(() => {
@@ -686,18 +686,18 @@ async function osrmRouteGeometry(points) {
   }
 
   const handleOrderArrived = orderId => {
-    showToast('司機已抵達上車點', 2500)
-  }
+    showToast(t(lang, 'driverArrivedPickupToast'), 2500)
+    }
 
-  const handleOrderCompletedLocal = orderId => {
-    setCompletedOrderIds(prev => {
-      const next = new Set(prev)
-      next.add(orderId)
-      return next
-    })
-    showToast('訂單已完成，感謝您的搭乘~', 3500)
-    onOrderCompleted?.(orderId)
-  }
+    const handleOrderCompletedLocal = orderId => {
+    setCompletedOrderIds(prev => {
+        const next = new Set(prev)
+        next.add(orderId)
+        return next
+    })
+    showToast(t(lang, 'orderCompletedThanksToast'), 3500)
+    onOrderCompleted?.(orderId)
+    }
 
 const ordersForMap = useMemo(() => {
   if (!composeMode) {
@@ -732,15 +732,6 @@ const ordersForMap = useMemo(() => {
   resolvedStops,
   previewStopsResolved,
 ])
-
-  const loginBtnText =
-    lang === 'en'
-      ? 'Please log in'
-      : lang === 'ja'
-      ? 'ログインしてください'
-      : lang === 'ko'
-      ? '로그인 해주세요'
-      : '請先登入'
 
   const startNextOrder = () => {
     setComposerLocked(false)
@@ -805,8 +796,19 @@ const ordersForMap = useMemo(() => {
         </div>
       </div>
 
-      <aside className="side-panel">
-        <div className="panel-inner">
+      <aside className={`side-panel ${panelCollapsed ? 'collapsed' : ''}`}>
+        <button
+        type="button"
+        className="panel-toggle-btn"
+        onClick={() => setPanelCollapsed(v => !v)}
+        aria-label={panelCollapsed ? t(lang, 'panelExpand') : t(lang, 'panelCollapse')}
+        title={panelCollapsed ? t(lang, 'panelExpand') : t(lang, 'panelCollapse')}
+        >
+        {panelCollapsed
+            ? `⌃ ${t(lang, 'panelExpand')}`
+            : `⌄ ${t(lang, 'panelCollapse')}`}
+        </button>
+        <div className={`panel-inner ${panelCollapsed ? 'hidden' : ''}`}>
           <h1 className="panel-title">{t(lang, 'passengerMode')}</h1>
 
           {toast && (
@@ -821,15 +823,15 @@ const ordersForMap = useMemo(() => {
               currentUser.username
             ) : (
               <button type="button" className="ghost-btn" onClick={() => onOpenAuth?.('rider', 'passenger')}>
-                {loginBtnText}
-              </button>
+                {t(lang, 'pleaseLoginFirst')}
+              </button>
             )}
           </div>
 
           {composerLocked ? (
             <button type="button" className="primary-btn" style={{ marginTop: 18, width: '100%' }} onClick={startNextOrder}>
-              新增另一張訂單
-            </button>
+                {t(lang, 'addAnotherOrder')}
+            </button>
           ) : (
             <>
               <div className="field-label" style={{ marginTop: 24 }}>

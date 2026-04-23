@@ -1,4 +1,3 @@
-// src/LandingPage.jsx
 import { useEffect, useState } from 'react'
 import './LandingPage.css'
 import { t, languages } from './i18n'
@@ -10,7 +9,6 @@ export default function LandingPage({
   onDriverClick,
   onAuthClick,
 }) {
-  // ====== Landing 輸入：上下車 + 建議 + 座標 ======
   const [pickupText, setPickupText] = useState('')
   const [dropoffText, setDropoffText] = useState('')
 
@@ -23,7 +21,9 @@ export default function LandingPage({
   const [pickupLocked, setPickupLocked] = useState(false)
   const [dropoffLocked, setDropoffLocked] = useState(false)
 
-  // 上車建議
+  // 所有尺寸都可收合；預設展開
+  const [isBookingCollapsed, setIsBookingCollapsed] = useState(false)
+
   useEffect(() => {
     if (pickupLocked) {
       setPickupSuggestions([])
@@ -54,7 +54,6 @@ export default function LandingPage({
     }
   }, [pickupText, pickupLocked])
 
-  // 下車建議
   useEffect(() => {
     if (dropoffLocked) {
       setDropoffSuggestions([])
@@ -109,6 +108,14 @@ export default function LandingPage({
     })
   }
 
+  const bookingCardClass = [
+    'booking-card',
+    'booking-card-collapsible',
+    isBookingCollapsed ? 'is-collapsed' : 'is-expanded',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
   return (
     <div id="top" className="landing-root">
       {/* 導覽列 */}
@@ -117,11 +124,15 @@ export default function LandingPage({
           <a className="navbar-brand fw-bold" href="#top">
             SmartDispatch
           </a>
+
           <button
             className="navbar-toggler"
             type="button"
             data-bs-toggle="collapse"
             data-bs-target="#navbarNav"
+            aria-controls="navbarNav"
+            aria-expanded="false"
+            aria-label="Toggle navigation"
           >
             <span className="navbar-toggler-icon" />
           </button>
@@ -168,7 +179,6 @@ export default function LandingPage({
               </li>
             </ul>
 
-            {/* 語言切換 */}
             <div className="ms-3 d-flex align-items-center text-white">
               <span className="small me-2">{t(lang, 'language')}：</span>
               <select
@@ -191,144 +201,126 @@ export default function LandingPage({
       {/* 乘客 hero 區塊 */}
       <section className="hero-section" id="passenger">
         <div className="hero-overlay" />
+
         <div className="container hero-content">
-          <div className="row align-items-center">
+          <div className="row align-items-center landing-hero-row">
             <div className="col-lg-6 text-white mb-5 mb-lg-0">
               <h1 className="display-4 fw-bold">{t(lang, 'landingHeroTitle')}</h1>
               <p className="lead mb-4">{t(lang, 'landingHeroSubtitle')}</p>
             </div>
 
             <div className="col-lg-5 offset-lg-1">
-              <div className="booking-card">
-                <h3 className="fw-bold mb-4">{t(lang, 'landingHeroWhereTo')}</h3>
+              <div className="booking-panel-wrap">
+                <button
+                  type="button"
+                  className="panel-toggle"
+                  onClick={() => setIsBookingCollapsed(v => !v)}
+                  aria-expanded={!isBookingCollapsed}
+                  aria-label={
+                    isBookingCollapsed
+                      ? t(lang, 'landingBookingExpandPanel')
+                      : t(lang, 'landingBookingCollapsePanel')
+                  }
+                >
+                  <span className="arrow">{isBookingCollapsed ? '⌄' : '⌃'}</span>
+                  <span>
+                    {isBookingCollapsed
+                      ? t(lang, 'landingBookingExpandBar')
+                      : t(lang, 'landingBookingCollapseBar')}
+                  </span>
+                </button>
 
-                <form>
-                  {/* 上車 */}
-                  <div className="mb-3 position-relative">
-                    <label className="form-label text-muted small">
-                      {t(lang, 'landingHeroPickupLabel')}
-                    </label>
-                    <input
-                      type="text"
-                      className="form-control form-control-lg"
-                      placeholder="輸入上車位置"
-                      value={pickupText}
-                      onChange={e => {
-                        setPickupText(e.target.value)
-                        setPickupLoc(null)
-                        setPickupLocked(false)
-                      }}
-                    />
-
-                    {pickupSuggestions.length > 0 && (
-                      <div
-                        className="autocomplete-dropdown"
-                        style={{
-                          position: 'absolute',
-                          zIndex: 10,
-                          left: 0,
-                          right: 0,
-                          top: '100%',
-                          marginTop: 6,
-                          background: '#fff',
-                          border: '1px solid #e9ecef',
-                          borderRadius: 8,
-                          overflow: 'hidden',
-                        }}
-                      >
-                        {pickupSuggestions.map((item, idx) => (
-                          <button
-                            key={idx}
-                            type="button"
-                            className="autocomplete-item"
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              padding: '10px 12px',
-                              border: 'none',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                            }}
-                            onClick={() => handleSelectPickup(item)}
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                <div className={bookingCardClass}>
+                  <div className="booking-card-header">
+                    <h3 className="fw-bold mb-0">{t(lang, 'landingHeroWhereTo')}</h3>
                   </div>
 
-                  {/* 下車 */}
-                  <div className="mb-3 position-relative">
-                    <label className="form-label text-muted small">
-                      {t(lang, 'landingHeroDropoffLabel')}
-                    </label>
-                    <input
-                      type="text"
-                      className="form-control form-control-lg"
-                      placeholder={t(lang, 'landingHeroDropoffPlaceholder')}
-                      value={dropoffText}
-                      onChange={e => {
-                        setDropoffText(e.target.value)
-                        setDropoffLoc(null)
-                        setDropoffLocked(false)
-                      }}
-                    />
+                  <div className="booking-card-body mt-4">
+                    <form>
+                      {/* 上車 */}
+                      <div className="mb-3 position-relative">
+                        <label className="form-label text-muted small">
+                          {t(lang, 'landingHeroPickupLabel')}
+                        </label>
+                        <input
+                          type="text"
+                          className="form-control form-control-lg"
+                          placeholder={t(lang, 'landingHeroPickupPlaceholder')}
+                          value={pickupText}
+                          onChange={e => {
+                            setPickupText(e.target.value)
+                            setPickupLoc(null)
+                            setPickupLocked(false)
+                          }}
+                        />
 
-                    {dropoffSuggestions.length > 0 && (
-                      <div
-                        className="autocomplete-dropdown"
-                        style={{
-                          position: 'absolute',
-                          zIndex: 10,
-                          left: 0,
-                          right: 0,
-                          top: '100%',
-                          marginTop: 6,
-                          background: '#fff',
-                          border: '1px solid #e9ecef',
-                          borderRadius: 8,
-                          overflow: 'hidden',
-                        }}
-                      >
-                        {dropoffSuggestions.map((item, idx) => (
-                          <button
-                            key={idx}
-                            type="button"
-                            className="autocomplete-item"
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              padding: '10px 12px',
-                              border: 'none',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                            }}
-                            onClick={() => handleSelectDropoff(item)}
-                          >
-                            {item.label}
-                          </button>
-                        ))}
+                        {pickupSuggestions.length > 0 && (
+                          <div className="autocomplete-dropdown">
+                            {pickupSuggestions.map((item, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                className="autocomplete-item"
+                                onClick={() => handleSelectPickup(item)}
+                              >
+                                {item.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  {/* 查看價格與車輛 → 直接進入乘客端（並帶草稿） */}
-                  <button
-                    type="button"
-                    className="btn btn-dark w-100 btn-lg py-3 fw-bold"
-                    onClick={goPassengerWithDraft}
-                  >
-                    {t(lang, 'landingHeroCta')}
-                  </button>
-                </form>
+                      {/* 下車 */}
+                      <div className="mb-3 position-relative">
+                        <label className="form-label text-muted small">
+                          {t(lang, 'landingHeroDropoffLabel')}
+                        </label>
+                        <input
+                          type="text"
+                          className="form-control form-control-lg"
+                          placeholder={t(lang, 'landingHeroDropoffPlaceholder')}
+                          value={dropoffText}
+                          onChange={e => {
+                            setDropoffText(e.target.value)
+                            setDropoffLoc(null)
+                            setDropoffLocked(false)
+                          }}
+                        />
+
+                        {dropoffSuggestions.length > 0 && (
+                          <div className="autocomplete-dropdown">
+                            {dropoffSuggestions.map((item, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                className="autocomplete-item"
+                                onClick={() => handleSelectDropoff(item)}
+                              >
+                                {item.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 查看價格與車輛 */}
+                      <button
+                        type="button"
+                        className="btn btn-dark w-100 btn-lg py-3 fw-bold"
+                        onClick={goPassengerWithDraft}
+                      >
+                        {t(lang, 'landingHeroCta')}
+                      </button>
+                    </form>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* 以下原樣保留（你的流程圖、司機招募、footer 不動） */}
+      {/* 流程圖 */}
       <section className="how-it-works-section py-5 bg-white">
         <div className="container text-center">
           <div className="mb-5">
@@ -390,6 +382,7 @@ export default function LandingPage({
         </div>
       </section>
 
+      {/* 司機招募 */}
       <section className="driver-section" id="driver">
         <div className="container">
           <div className="row align-items-center">
@@ -400,15 +393,18 @@ export default function LandingPage({
                 alt="Driver App UI"
               />
             </div>
+
             <div className="col-md-6">
               <span className="badge bg-warning text-dark mb-2">
                 {t(lang, 'landingDriverBadge')}
               </span>
+
               <h2 className="fw-bold mb-3">
                 {t(lang, 'landingDriverTitleLine1')}
                 <br />
                 {t(lang, 'landingDriverTitleLine2')}
               </h2>
+
               <p className="text-muted">{t(lang, 'landingDriverIntro')}</p>
 
               <ul className="list-unstyled mt-4">

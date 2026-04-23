@@ -162,9 +162,51 @@ orderStatus_en_route: '前往上車點',
 orderStatus_in_progress: '行程中',
 orderStatus_completed: '已完成',
 orderStatus_cancelled: '已取消',
+orderStatus_picked_up: '行程中',
+orderStatus_ongoing: '行程中',
+
+//儀表
+replaySpeedTitle: '播放速度',
+replaySpeedCurrent: '目前：',
+traceLabel: '軌跡',
+replayLabel: '重播',
+sourceLabel: '來源：',
+sumoLabel: 'SUMO',
+physicsLabel: '物理模擬',
+speedLabel: '速度：',
+speedUnit: 'km/h',
+timeShortLabel: '時間：',
+timeSecondUnit: '秒',
+expand: '展開',
+collapse: '收合',
+
+//司機乘客頁的
+panelExpand: '展開',
+panelCollapse: '收合',
+pleaseLoginFirst: '請先登入',
+
+driverSetInitialLocationHint: '⚠️ 請先在地圖上點擊一下，設定您的初始位置。',
+driverResetLocationDebug: '重設定位（debug）',
+
+driverCompletedOrdersTitle: '已完成訂單',
+driverCompletedTag: '已完成',
+driverOrderPrefix: '訂單 #',
+driverCompletedNoticePrefix: '此筆訂單已完成',
+driverCompletedNoticePriceLabel: '金額：',
+unknownValue: '未知',
+
+addAnotherOrder: '新增另一張訂單',
+driverArrivedPickupToast: '司機已抵達上車點',
+orderCompletedThanksToast: '訂單已完成，感謝您的搭乘～',
+
+//收合功能
+landingBookingExpandBar: '展開叫車欄',
+landingBookingCollapseBar: '收合叫車欄',
+landingBookingExpandPanel: '展開叫車面板',
+landingBookingCollapsePanel: '收合叫車面板',
+logout: '登出',
 
 
-    
   },
 
   en: {
@@ -328,7 +370,49 @@ orderStatus_en_route: 'En route',
 orderStatus_in_progress: 'In progress',
 orderStatus_completed: 'Completed',
 orderStatus_cancelled: 'Cancelled',
+orderStatus_picked_up: 'On trip',
+orderStatus_ongoing: 'On trip',
 
+//儀表
+replaySpeedTitle: 'Replay Speed',
+replaySpeedCurrent: 'Current:',
+traceLabel: 'TRACE',
+replayLabel: 'REPLAY',
+sourceLabel: 'Source:',
+sumoLabel: 'SUMO',
+physicsLabel: 'PHYSICS',
+speedLabel: 'Speed:',
+speedUnit: 'km/h',
+timeShortLabel: 't:',
+timeSecondUnit: 's',
+expand: 'Expand',
+collapse: 'Collapse',
+
+//司機乘客頁的
+panelExpand: 'Expand',
+panelCollapse: 'Collapse',
+pleaseLoginFirst: 'Please log in',
+
+driverSetInitialLocationHint: '⚠️ Please click once on the map to set your initial location.',
+driverResetLocationDebug: 'Reset location (debug)',
+
+driverCompletedOrdersTitle: 'Completed Orders',
+driverCompletedTag: 'Completed',
+driverOrderPrefix: 'Order #',
+driverCompletedNoticePrefix: 'This order has been completed',
+driverCompletedNoticePriceLabel: 'Amount: ',
+unknownValue: 'Unknown',
+
+addAnotherOrder: 'Create another order',
+driverArrivedPickupToast: 'The driver has arrived at the pickup point.',
+orderCompletedThanksToast: 'Your order is completed. Thank you for riding with us!',
+
+//收合
+landingBookingExpandBar: 'Expand booking form',
+landingBookingCollapseBar: 'Collapse booking form',
+landingBookingExpandPanel: 'Expand booking panel',
+landingBookingCollapsePanel: 'Collapse booking panel',
+logout: 'Log out',
   },
 
   ko: {
@@ -490,7 +574,49 @@ orderStatus_en_route: '승차 지점으로 이동 중',
 orderStatus_in_progress: '운행 중',
 orderStatus_completed: '완료',
 orderStatus_cancelled: '취소됨',
+orderStatus_picked_up: '운행 중',
+orderStatus_ongoing: '운행 중',
 
+//儀表
+replaySpeedTitle: '재생 속도',
+replaySpeedCurrent: '현재:',
+traceLabel: '트레이스',
+replayLabel: '재생',
+sourceLabel: '출처:',
+sumoLabel: 'SUMO',
+physicsLabel: '물리 시뮬레이션',
+speedLabel: '속도:',
+speedUnit: 'km/h',
+timeShortLabel: '시간:',
+timeSecondUnit: '초',
+expand: '펼치기',
+collapse: '접기',
+
+//司機乘客頁的
+panelExpand: '펼치기',
+panelCollapse: '접기',
+pleaseLoginFirst: '로그인 해주세요',
+
+driverSetInitialLocationHint: '⚠️ 지도에서 한 번 클릭하여 초기 위치를 설정하세요.',
+driverResetLocationDebug: '위치 재설정 (debug)',
+
+driverCompletedOrdersTitle: '완료된 주문',
+driverCompletedTag: '완료',
+driverOrderPrefix: '주문 #',
+driverCompletedNoticePrefix: '이 주문이 완료되었습니다',
+driverCompletedNoticePriceLabel: '금액: ',
+unknownValue: '알 수 없음',
+
+addAnotherOrder: '다른 주문 추가',
+driverArrivedPickupToast: '기사가 픽업 지점에 도착했습니다.',
+orderCompletedThanksToast: '주문이 완료되었습니다. 이용해 주셔서 감사합니다!',
+
+//收合
+landingBookingExpandBar: '배차 입력창 펼치기',
+landingBookingCollapseBar: '배차 입력창 접기',
+landingBookingExpandPanel: '배차 패널 펼치기',
+landingBookingCollapsePanel: '배차 패널 접기',
+logout: '로그아웃',
   },
 
   ja: {
@@ -657,7 +783,49 @@ orderStatus_en_route: '迎えに向かっています',
 orderStatus_in_progress: '走行中',
 orderStatus_completed: '完了',
 orderStatus_cancelled: 'キャンセル',
+orderStatus_picked_up: '走行中',
+orderStatus_ongoing: '走行中',
 
+//儀表
+replaySpeedTitle: '再生速度',
+replaySpeedCurrent: '現在：',
+traceLabel: '軌跡',
+replayLabel: '再生',
+sourceLabel: 'ソース：',
+sumoLabel: 'SUMO',
+physicsLabel: '物理シミュレーション',
+speedLabel: '速度：',
+speedUnit: 'km/h',
+timeShortLabel: '時間：',
+timeSecondUnit: '秒',
+expand: '展開',
+collapse: '折りたたむ',
+
+//司機乘客頁的
+panelExpand: '展開',
+panelCollapse: '折りたたむ',
+pleaseLoginFirst: 'ログインしてください',
+
+driverSetInitialLocationHint: '⚠️ 地図を一度クリックして初期位置を設定してください。',
+driverResetLocationDebug: '位置をリセット（debug）',
+
+driverCompletedOrdersTitle: '完了した注文',
+driverCompletedTag: '完了',
+driverOrderPrefix: '注文 #',
+driverCompletedNoticePrefix: 'この注文は完了しました',
+driverCompletedNoticePriceLabel: '金額：',
+unknownValue: '不明',
+
+addAnotherOrder: '別の注文を追加',
+driverArrivedPickupToast: 'ドライバーが乗車地点に到着しました。',
+orderCompletedThanksToast: '注文が完了しました。ご利用ありがとうございました！',
+
+//收合
+landingBookingExpandBar: '配車欄を展開',
+landingBookingCollapseBar: '配車欄を折りたたむ',
+landingBookingExpandPanel: '配車パネルを展開',
+landingBookingCollapsePanel: '配車パネルを折りたたむ',
+logout: 'ログアウト',
   },
 }
 

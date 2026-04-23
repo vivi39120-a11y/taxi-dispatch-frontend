@@ -14,22 +14,6 @@ function normalizeStatus(s) {
   return k
 }
 
-function statusLabel(lang, statusKey) {
-  const zh = {
-    pending: '等待派單',
-    assigned: '已指派',
-    accepted: '司機已接單',
-    en_route: '前往上車點',
-    picked_up: '行程中',
-    in_progress: '行程中',
-    ongoing: '行程中',
-    completed: '已完成',
-    cancelled: '已取消',
-  }
-  const dict = lang === 'zh' ? zh : zh
-  return dict[statusKey] || (lang === 'zh' ? '進行中' : 'In progress')
-}
-
 function statusTone(statusKey) {
   if (statusKey === 'completed') return 'success'
   if (statusKey === 'cancelled') return 'danger'
@@ -64,8 +48,8 @@ export default function OrderList({
   orders,
   drivers,
   isDriverView,
-  currentDriverId, // 司機端會傳
-  onAcceptOrder, // 司機端會傳
+  currentDriverId,
+  onAcceptOrder,
   selectedOrderId,
   completedOrderIds,
   onSelectOrder,
@@ -86,7 +70,6 @@ export default function OrderList({
         <div className="ub-orders__title">
           {t(lang, isDriverView ? 'ordersTitleDriver' : 'ordersTitlePassenger')}
         </div>
-        <div className="ub-orders__count">{list.length} 筆</div>
       </div>
 
       <div className="ub-orders__grid">
@@ -94,7 +77,6 @@ export default function OrderList({
           const id = o?.id
           const isSelected = id != null && selectedOrderId === id
 
-          // ✅ 只信 completedOrderIds：避免後端狀態亂寫
           const done = Boolean(completedOrderIds?.has?.(id))
 
           const rawStatus = normalizeStatus(o?.status)
@@ -106,16 +88,34 @@ export default function OrderList({
           const driverId = o?.driverId ?? o?.assignedDriverId ?? o?.driver_id
           const driverName =
             driverId != null
-              ? (driverMap.get(driverId)?.name || driverMap.get(driverId)?.username || '')
+              ? driverMap.get(driverId)?.name || driverMap.get(driverId)?.username || ''
               : ''
 
-          // ✅ 司機端：pending + 未指派司機 + 有接單 callback => 顯示「接單」
           const canAccept =
             Boolean(isDriverView) &&
             !done &&
             statusKey === 'pending' &&
             driverId == null &&
             typeof onAcceptOrder === 'function'
+
+                    const showRecommendBlock =
+            Boolean(isDriverView) &&
+            !done &&
+            statusKey === 'pending' &&
+            driverId == null
+
+          const recommendScore =
+            typeof o?.recommendScore === 'number' && Number.isFinite(o.recommendScore)
+              ? o.recommendScore
+              : typeof o?.recommendScore === 'string' && o.recommendScore.trim()
+              ? o.recommendScore.trim()
+              : null
+
+          const recommendAccept =
+            typeof o?.recommendAccept === 'boolean' ? o.recommendAccept : null
+
+          const recommendLabel =
+            typeof o?.recommendLabel === 'string' ? o.recommendLabel.trim() : ''
 
           const acceptDisabled = !currentDriverId || id == null
 
@@ -150,36 +150,42 @@ export default function OrderList({
                       onKeyDown={e => {
                         if (e.key === 'Enter' || e.key === ' ') onAccept(e)
                       }}
-                      title={acceptDisabled ? '請先登入/選擇司機' : '接單'}
+                      title={
+                        acceptDisabled
+                          ? t(lang, 'orderAcceptDisabledHint')
+                          : t(lang, 'orderAccept')
+                      }
                     >
-                      接單
+                      {t(lang, 'orderAccept')}
                     </span>
                   ) : (
-                    <span className={`ub-chip ub-chip--${tone}`}>{statusLabel(lang, statusKey)}</span>
+                    <span className={`ub-chip ub-chip--${tone}`}>
+                      {t(lang, `orderStatus_${statusKey}`)}
+                    </span>
                   )}
 
-                  {o?.vehicleType ? <span className="ub-chip ub-chip--ghost">{o.vehicleType}</span> : null}
+                  {o?.vehicleType ? (
+                    <span className="ub-chip ub-chip--ghost">{o.vehicleType}</span>
+                  ) : null}
 
-                  {/* 額外資訊可選：顯示司機名（乘客端也可看得到） */}
-                  {driverName ? <span className="ub-chip ub-chip--ghost">{driverName}</span> : null}
+                  {driverName ? (
+                    <span className="ub-chip ub-chip--ghost">{driverName}</span>
+                  ) : null}
                 </div>
-
-                <div className="ub-orderCard__id">#{id ?? '-'}</div>
               </div>
 
               <div className="ub-route">
                 <div className="ub-route__row">
                   <span className="ub-route__dot" aria-hidden="true" />
                   <div className="ub-route__content">
-                    <div className="ub-route__label">上車</div>
+                    <div className="ub-route__label">{t(lang, 'orderPickupLabel')}</div>
                     <div className="ub-route__text">{pickup}</div>
                   </div>
                 </div>
 
-                {/* ✅ 停靠點（新增） */}
                 {visibleStops.length > 0 && (
                   <div className="ub-route__stops">
-                    <div className="ub-route__stopsLabel">停靠點</div>
+                    <div className="ub-route__stopsLabel">{t(lang, 'orderStopsLabel')}</div>
                     <div className="ub-route__stopsText">
                       {visibleStops.join(' · ')}
                       {moreCount > 0 ? ` · +${moreCount}` : ''}
@@ -190,27 +196,147 @@ export default function OrderList({
                 <div className="ub-route__row" style={{ marginTop: 10 }}>
                   <span className="ub-route__dot is-hollow" aria-hidden="true" />
                   <div className="ub-route__content">
-                    <div className="ub-route__label">下車</div>
+                    <div className="ub-route__label">{t(lang, 'orderDropoffLabel')}</div>
                     <div className="ub-route__text">{dropoff}</div>
                   </div>
                 </div>
               </div>
 
-              <div className="ub-meta">
+                            <div className="ub-meta">
                 <div className="ub-meta__item">
-                  <span className="ub-meta__k">司機</span>
+                  <span className="ub-meta__k">{t(lang, 'orderDriverLabel')}</span>
                   <span className="ub-meta__v">{driverName || driverId || '—'}</span>
                 </div>
 
                 <div className="ub-meta__item">
-                  <span className="ub-meta__k">距離</span>
+                  <span className="ub-meta__k">{t(lang, 'orderDistanceLabel')}</span>
                   <span className="ub-meta__v">
-                    {typeof o?.distanceKm === 'number' ? `${o.distanceKm.toFixed(1)} km` : '—'}
+                    {typeof o?.driverDistanceKm === 'number' && Number.isFinite(o.driverDistanceKm)
+                      ? `${o.driverDistanceKm.toFixed(1)} ${t(lang, 'distanceKmUnit')}`
+                      : typeof o?.distanceKm === 'number' && Number.isFinite(o.distanceKm)
+                      ? `${o.distanceKm.toFixed(1)} ${t(lang, 'distanceKmUnit')}`
+                      : '—'}
                   </span>
                 </div>
 
+                {showRecommendBlock && (
+                  <>
+                    <div className="ub-meta__item">
+                      <span className="ub-meta__k">接單推薦分數</span>
+                      <span className="ub-meta__v">
+                        {typeof recommendScore === 'number'
+                          ? recommendScore.toFixed(3)
+                          : typeof recommendScore === 'string'
+                          ? recommendScore
+                          : '—'}
+                      </span>
+                    </div>
+
+                    {recommendLabel && (
+                      <div className="ub-meta__item">
+                        <span className="ub-meta__k">建議接單</span>
+                        <span
+                          className="ub-meta__v"
+                          style={{
+                            color: recommendAccept === true ? '#2e7d32' : '#c62828',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {recommendLabel}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/*{showRecommendBlock && (
+                  <div className="ub-meta__item ub-meta__item--full">
+                    <span className="ub-meta__k">分數拆解 debug</span>
+                    <div
+                      className="ub-meta__v"
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr',
+                        gap: '4px 12px',
+                        fontSize: 12,
+                        lineHeight: 1.5,
+                        whiteSpace: 'normal',
+                      }}
+                    >
+                      <span>
+                        earningN：
+                        {typeof o?.recommendEarningN === 'number'
+                          ? o.recommendEarningN.toFixed(3)
+                          : '—'}
+                      </span>
+
+                      <span>
+                        demandN：
+                        {typeof o?.recommendDemandN === 'number'
+                          ? o.recommendDemandN.toFixed(3)
+                          : '—'}
+                      </span>
+
+                      <span>
+                        priorityN：
+                        {typeof o?.recommendPriorityN === 'number'
+                          ? o.recommendPriorityN.toFixed(3)
+                          : '—'}
+                      </span>
+
+                      <span>
+                        distanceN：
+                        {typeof o?.recommendDistanceN === 'number'
+                          ? o.recommendDistanceN.toFixed(3)
+                          : '—'}
+                      </span>
+
+                      <span>
+                        zoneSupplyN：
+                        {typeof o?.recommendZoneSupplyN === 'number'
+                          ? o.recommendZoneSupplyN.toFixed(3)
+                          : '—'}
+                      </span>
+
+                      <span>
+                        localSupplyN：
+                        {typeof o?.recommendLocalSupplyN === 'number'
+                          ? o.recommendLocalSupplyN.toFixed(3)
+                          : '—'}
+                      </span>
+
+                      <span>
+                        distanceRaw：
+                        {typeof o?.recommendDistanceRaw === 'number'
+                          ? o.recommendDistanceRaw.toFixed(2)
+                          : '—'}
+                      </span>
+
+                      <span>
+                        earningRaw：
+                        {typeof o?.recommendEarningRaw === 'number'
+                          ? o.recommendEarningRaw.toFixed(3)
+                          : '—'}
+                      </span>
+                                            <span>
+                        demandRaw：
+                        {typeof o?.recommendDemandRaw === 'number'
+                          ? o.recommendDemandRaw.toFixed(3)
+                          : '—'}
+                      </span>
+
+                      <span>
+                        priorityRaw：
+                        {typeof o?.recommendPriorityRaw === 'number'
+                          ? o.recommendPriorityRaw.toFixed(3)
+                          : '—'}
+                      </span>
+                    </div>
+                  </div>
+                )}*/}
+
                 <div className="ub-meta__item ub-meta__item--full">
-                  <span className="ub-meta__k">時間</span>
+                  <span className="ub-meta__k">{t(lang, 'orderTimeLabel')}</span>
                   <span className="ub-meta__v">{o?.updatedAt || o?.createdAt || '—'}</span>
                 </div>
               </div>
@@ -218,7 +344,7 @@ export default function OrderList({
           )
         })}
 
-        {!list.length && <div className="ub-empty">目前沒有訂單</div>}
+        {!list.length && <div className="ub-empty">{t(lang, 'orderEmpty')}</div>}
       </div>
     </div>
   )

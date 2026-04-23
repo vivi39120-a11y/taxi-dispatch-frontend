@@ -333,6 +333,9 @@ export default function App() {
 
   const [drivers, setDrivers] = useState([])
   const [orders, setOrders] = useState([])
+  const [zones, setZones] = useState([])
+  const [zonesLoading, setZonesLoading] = useState(false)
+  const [zonesError, setZonesError] = useState('')
 
   const [currentDriverId, setCurrentDriverId] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -585,8 +588,44 @@ export default function App() {
     }
   }
 
-  useEffect(() => {
+    const fetchZones = async () => {
+    try {
+      setZonesLoading(true)
+      setZonesError('')
+
+      const res = await apiFetch('/api/zone-hotspots', { timeoutMs: 60000 })
+      if (!res.ok) throw new Error(`zone-hotspots ${res.status}`)
+
+      const data = await res.json()
+      const rows = Array.isArray(data?.rows) ? data.rows : []
+
+      const formatted = rows
+        .map(r => ({
+          ...r,
+          PULocationID: Number(r.PULocationID ?? r.zone_id ?? 0),
+          lat: Number(r.lat_wgs),
+          lon: Number(r.lon_wgs),
+          pred_rides: Number(r.pred_rides ?? 0),
+          priority: Number(r.priority ?? 0),
+        }))
+        .filter(r => Number.isFinite(r.lat) && Number.isFinite(r.lon))
+
+      setZones(formatted)
+        } catch (err) {
+      const msg = String(err?.message || err || '')
+      if (msg.includes('replaced by newer request')) {
+        return
+      }
+      console.error('load zones failed', err)
+      setZonesError(msg.includes('timeout') ? '熱點資料載入逾時' : '熱點資料載入失敗')
+    } finally {
+      setZonesLoading(false)
+    }
+  }
+
+    useEffect(() => {
     fetchAll()
+    fetchZones()
     const timer = setInterval(fetchAll, 5000)
     return () => clearInterval(timer)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -832,7 +871,7 @@ export default function App() {
     setDriverHotspotPosById(prev => ({ ...prev, [id]: { lat, lng } }))
   }
 
-  const registerUser = async ({ username, password, role, carType }) => {
+    const registerUser = async ({ username, password, role, carType }) => {
     try {
       const res = await apiFetch('/api/register', {
         method: 'POST',
@@ -862,10 +901,17 @@ export default function App() {
         writePassengerCred({ username: user.username, password })
       }
 
-      setShowLanding(true)
+      setShowLanding(false)
       setShowAuth(false)
       setShowHeatmap(false)
-      setUrlParams({ role: null, auth: false })
+
+      if (role === 'driver') {
+        setMode('driver')
+        setUrlParams({ role: 'driver', auth: false })
+      } else {
+        setMode('rider')
+        setUrlParams({ role: 'passenger', auth: false })
+      }
 
       fetchAll()
       return { ok: true }
@@ -875,7 +921,7 @@ export default function App() {
     }
   }
 
-  const loginUser = async ({ username, password, role }) => {
+    const loginUser = async ({ username, password, role }) => {
     try {
       const isDriverLogin = role === 'driver'
       const res = await apiFetch(isDriverLogin ? '/api/driver-login' : '/api/login', {
@@ -899,10 +945,17 @@ export default function App() {
         writePassengerCred({ username: user.username, password })
       }
 
-      setShowLanding(true)
+      setShowLanding(false)
       setShowAuth(false)
       setShowHeatmap(false)
-      setUrlParams({ role: null, auth: false })
+
+      if (isDriverLogin) {
+        setMode('driver')
+        setUrlParams({ role: 'driver', auth: false })
+      } else {
+        setMode('rider')
+        setUrlParams({ role: 'passenger', auth: false })
+      }
 
       fetchAll()
       return { ok: true }
@@ -1005,7 +1058,7 @@ export default function App() {
               onClick={logoutCurrentMode}
               style={{ marginLeft: 8, borderColor: '#d32f2f', color: '#d32f2f' }}
             >
-              登出
+              {t(lang, 'logout')}
             </button>
 
             <div className="lang-switch">
@@ -1089,7 +1142,7 @@ export default function App() {
             onClick={logoutCurrentMode}
             style={{ marginLeft: 8, borderColor: '#d32f2f', color: '#d32f2f' }}
           >
-            登出
+            {t(lang, 'logout')}
           </button>
 
           <div className="lang-select" style={{ marginLeft: 16 }}>
@@ -1126,6 +1179,8 @@ export default function App() {
             orders={orders}
             ordersWithLocations={driverOrdersWithLoc}
             onDriverLocationChange={handleDriverLocationChange}
+            hotspots={zones}
+            showHotspots={false}
           />
         )}
       </main>
@@ -1138,6 +1193,9 @@ export default function App() {
             drivers={drivers}
             orders={driverOrdersWithLoc}
             simulateVehicles={simulateVehicles}
+            zones={zones}
+            zonesLoading={zonesLoading}
+            zonesError={zonesError}
           />
         </div>
       )}

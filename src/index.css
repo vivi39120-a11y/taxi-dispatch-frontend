@@ -258,7 +258,7 @@ body {
 /* 右側 / 底部 浮動面板 */
 .side-panel {
   position: absolute;
-  z-index: 2000; /* ⭐ 確保在地圖上層 */
+  z-index: 2000;
   top: 16px;
   right: 24px;
   width: 420px;
@@ -272,6 +272,41 @@ body {
 
   padding: 24px 24px 20px;
   overflow-y: auto;
+  transition: all 0.3s ease;
+}
+
+.panel-toggle-btn {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 5;
+
+  border: none;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.panel-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.panel-inner.hidden {
+  display: none;
+}
+
+.side-panel.collapsed {
+  min-height: 56px;
+  height: 56px;
+  max-height: 56px;
+  overflow: hidden;
+  padding-top: 12px;
+  padding-bottom: 12px;
 }
 
 /* 捲軸美化（側邊卡片） */
@@ -409,12 +444,7 @@ body {
   z-index: 1;
 }
 
-.booking-card {
-  background: white;
-  padding: 30px;
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-}
+
 
 .driver-section {
   background-color: #f8f9fa;
@@ -442,6 +472,22 @@ body {
     max-height: 55%;
     padding: 16px 16px 14px;
     border-radius: 18px;
+  }
+
+    .side-panel.collapsed {
+    min-height: 52px;
+    height: 52px;
+    max-height: 52px;
+    overflow: hidden;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .panel-toggle-btn {
+    top: 8px;
+    right: 10px;
+    font-size: 12px;
+    padding: 5px 10px;
   }
 }
 

@@ -4,6 +4,26 @@ import MapView from '../components/MapView.jsx'
 import OrderList from '../components/OrderList.jsx'
 import { t } from '../i18n'
 import { apiFetch } from '../apiBase.js'
+const HOTSPOT_MOVE_TASK_KEY = 'hotspotMoveTaskV1'
+const HOTSPOT_MOVE_EVT = 'hotspotMoveTaskChanged'
+const ORDER_RECOMMEND_MIN_GAIN = 0.2
+const ORDER_W_EARNING = 1.2
+const ORDER_W_DEMAND = 2.0
+const ORDER_W_PRIORITY = 0.9
+const ORDER_W_DISTANCE = 0.9
+const ORDER_W_ZONE_SUPPLY = 0.45
+const ORDER_W_LOCAL_SUPPLY = 0.20
+const ORDER_LOCAL_RADIUS_KM = 2.0
+const ORDER_DISTANCE_CIRCUITY_FACTOR = 1.3
+
+function readHotspotMoveTask() {
+  try {
+    const raw = localStorage.getItem(HOTSPOT_MOVE_TASK_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
 
 // --- 工具函數 ---
 function normalizeVehicleType(value) {
@@ -48,6 +68,37 @@ function getPickupLoc(o) {
   return null
 }
 
+function getDropoffLoc(o) {
+  const p = o?.dropoffLocation
+  if (p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng))) {
+    return { lat: Number(p.lat), lng: Number(p.lng) }
+  }
+  const lat = Number(o?.dropoffLat)
+  const lng = Number(o?.dropoffLng)
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng }
+  return null
+}
+
+function getOrderPrice(o) {
+  const candidates = [
+    o?.price,
+    o?.estimatedFare,
+    o?.estimated_fare,
+    o?.fare,
+    o?.estimatedPrice,
+    o?.estimated_price,
+    o?.amount,
+    o?.totalFare,
+    o?.total_fare,
+  ]
+
+  for (const v of candidates) {
+    const n = Number(v)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return null
+}
+
 function makeOrderKey(o) {
   const id = Number(o?.id)
   if (!Number.isFinite(id)) return null
@@ -68,6 +119,95 @@ function round6(x) {
   const n = Number(x)
   if (!Number.isFinite(n)) return null
   return Math.round(n * 1e6) / 1e6
+}
+
+function haversineKm(a, b) {
+  if (!a || !b) return Infinity
+  const lat1 = Number(a.lat)
+  const lng1 = Number(a.lng)
+  const lat2 = Number(b.lat)
+  const lng2 = Number(b.lng)
+  if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return Infinity
+
+  const R = 6371
+  const toRad = d => (d * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)))
+}
+
+function getOrderIntermediateStops(o) {
+  const stops = Array.isArray(o?.stops) ? o.stops : []
+  return stops
+    .map(s => ({
+      lat: Number(s?.lat),
+      lng: Number(s?.lng ?? s?.lon),
+      type: String(s?.type || '').toLowerCase(),
+    }))
+    .filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng))
+    .filter(s => s.type !== 'driver' && s.type !== 'pickup')
+}
+
+function buildOrderRoutePoints(driverLoc, o) {
+  const pickup = getPickupLoc(o)
+  const dropoff = getDropoffLoc(o)
+  if (!driverLoc || !pickup || !dropoff) return []
+
+  const stops = getOrderIntermediateStops(o)
+  return [
+    { lat: Number(driverLoc.lat), lng: Number(driverLoc.lng) },
+    { lat: Number(pickup.lat), lng: Number(pickup.lng) },
+    ...stops.map(s => ({ lat: s.lat, lng: s.lng })),
+    { lat: Number(dropoff.lat), lng: Number(dropoff.lng) },
+  ]
+}
+
+function routeDistanceKm(points) {
+  if (!Array.isArray(points) || points.length < 2) return null
+
+  let total = 0
+  for (let i = 1; i < points.length; i++) {
+    const seg = haversineKm(points[i - 1], points[i])
+    if (!Number.isFinite(seg)) return null
+    total += seg
+  }
+
+  return total * ORDER_DISTANCE_CIRCUITY_FACTOR
+}
+
+
+function minmax01FromValues(value, values) {
+  const nums = (values || []).map(Number).filter(Number.isFinite)
+  const v = Number(value)
+  if (!Number.isFinite(v) || !nums.length) return 0
+  const mn = Math.min(...nums)
+  const mx = Math.max(...nums)
+  if (mx - mn < 1e-12) return 0
+  return (v - mn) / (mx - mn)
+}
+
+function findNearestHotspotForPoint(point, hotspots) {
+  if (!point || !Array.isArray(hotspots) || !hotspots.length) return null
+
+  let best = null
+  let bestD = Infinity
+
+  for (const h of hotspots) {
+    const hp = {
+      lat: Number(h?.lat),
+      lng: Number(h?.lon ?? h?.lng),
+    }
+    const d = haversineKm(point, hp)
+    if (d < bestD) {
+      bestD = d
+      best = h
+    }
+  }
+
+  return best
 }
 
 async function mapLimit(items, limit, fn) {
@@ -154,6 +294,7 @@ function clearDriverLocationState(driverId) {
     localStorage.removeItem(driverLocTsKey(driverId))
   } catch {}
 }
+
 
 export default function DriverView({
   lang,
@@ -255,28 +396,48 @@ export default function DriverView({
   const [selectedOrderId, setSelectedOrderId] = useState(null)
   const [orderDistances, setOrderDistances] = useState({})
   const [completedNotice, setCompletedNotice] = useState('')
+  const [panelCollapsed, setPanelCollapsed] = useState(false)
+  const [hotspotMoveTask, setHotspotMoveTask] = useState(() => readHotspotMoveTask())
+  const [liveDriverLoc, setLiveDriverLoc] = useState(null)
   const completedSeenRef = useRef(new Set())
 
   useEffect(() => {
+    const syncTask = (e) => {
+      const nextTask = e?.detail?.task ?? readHotspotMoveTask()
+      setHotspotMoveTask(nextTask)
+    }
+
+    window.addEventListener(HOTSPOT_MOVE_EVT, syncTask)
+    return () => window.removeEventListener(HOTSPOT_MOVE_EVT, syncTask)
+  }, [])
+
+    useEffect(() => {
     setSelectedOrderId(null)
+    setLiveDriverLoc(null)
   }, [effectiveDriverId, isLoggedIn])
 
   // ✅ 修正：
   // 第一次點地圖定位才需要上鎖
   // 之後完成訂單 / 行程同步更新位置，不能被 locConfirmed 擋掉
-  const handleDriverLocationChange = useCallback(
+    const handleDriverLocationChange = useCallback(
     p => {
       if (!driverReady) return
       if (!p || effectiveDriverId == null) return
       if (!sameId(p.id, effectiveDriverId)) return
 
-      if (!locConfirmed) {
-  setLocConfirmed(true)
-  writeLocConfirmed(effectiveDriverId, true)
-}
+      const lat = Number(p.lat)
+      const lng = Number(p.lng)
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        setLiveDriverLoc({ lat, lng })
+      }
 
-writeLocTimestamp(effectiveDriverId, Date.now())
-onDriverLocationChange?.(p)
+      if (!locConfirmed) {
+        setLocConfirmed(true)
+        writeLocConfirmed(effectiveDriverId, true)
+      }
+
+      writeLocTimestamp(effectiveDriverId, Date.now())
+      onDriverLocationChange?.(p)
     },
     [onDriverLocationChange, effectiveDriverId, locConfirmed, driverReady]
   )
@@ -288,11 +449,24 @@ onDriverLocationChange?.(p)
   setLocConfirmed(false)
 }, [effectiveDriverId])
 
+
+
   // ✅ 修正：
   // 每次顯示司機位置優先吃 localStorage 的最新 driverLoc
   // 這樣完成訂單後的新終點就會直接成為下一次起點
   const myDriverLoc = useMemo(() => {
     if (!locConfirmed || effectiveDriverId == null) return null
+
+    if (
+      liveDriverLoc &&
+      Number.isFinite(Number(liveDriverLoc.lat)) &&
+      Number.isFinite(Number(liveDriverLoc.lng))
+    ) {
+      return {
+        lat: Number(liveDriverLoc.lat),
+        lng: Number(liveDriverLoc.lng),
+      }
+    }
 
     const persisted = readPersistedDriverLoc(effectiveDriverId)
     if (persisted) return persisted
@@ -306,7 +480,7 @@ onDriverLocationChange?.(p)
     }
 
     return null
-  }, [myDriver, locConfirmed, effectiveDriverId])
+  }, [myDriver, locConfirmed, effectiveDriverId, liveDriverLoc])
 
   const visibleDrivers = useMemo(() => {
     if (!driverReady || !locConfirmed || !myDriverLoc) return []
@@ -346,9 +520,70 @@ onDriverLocationChange?.(p)
     return candidates[0]
   }, [allOrdersFromProps, effectiveDriverId, driverReady])
 
-  useEffect(() => {
+    const myHotspotMove = useMemo(() => {
+    if (!driverReady || effectiveDriverId == null) return null
+    if (!hotspotMoveTask) return null
+    if (!sameId(hotspotMoveTask.driverId, effectiveDriverId)) return null
+    if (hotspotMoveTask.status !== 'moving') return null
+    if (!Array.isArray(hotspotMoveTask.coords) || hotspotMoveTask.coords.length < 2) return null
+    if (!hotspotMoveTask.start || !hotspotMoveTask.end) return null
+
+    return {
+      id: Number(hotspotMoveTask.taskId),
+      createdAt: hotspotMoveTask.createdAt || new Date().toISOString(),
+      updatedAt: hotspotMoveTask.createdAt || new Date().toISOString(),
+      status: 'en_route',
+      driverId: effectiveDriverId,
+      pickupLocation: {
+        lat: Number(hotspotMoveTask.start.lat),
+        lng: Number(hotspotMoveTask.start.lng),
+      },
+      dropoffLocation: {
+        lat: Number(hotspotMoveTask.end.lat),
+        lng: Number(hotspotMoveTask.end.lng),
+      },
+      stops: [],
+      _isHotspotMove: true,
+      _hotspotTaskId: Number(hotspotMoveTask.taskId),
+      _prebuiltRoute: hotspotMoveTask.coords.map(p => [Number(p[0]), Number(p[1])]),
+      _hidePickupMarker: true,
+      _hideDropoffMarker: true,
+      _forceUpdate: `hotspot:${hotspotMoveTask.taskId}`,
+    }
+  }, [hotspotMoveTask, driverReady, effectiveDriverId])
+
+      const isDriverMoving = useMemo(() => {
+    return Boolean(myActiveOrder || myHotspotMove)
+  }, [myActiveOrder, myHotspotMove])
+  
+  const handleCarPosChange = useCallback(
+    p => {
+      if (
+        isDriverMoving &&
+        p &&
+        effectiveDriverId != null &&
+        sameId(p.id, effectiveDriverId)
+      ) {
+        const lat = Number(p.lat)
+        const lng = Number(p.lng)
+
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          setLiveDriverLoc({ lat, lng })
+          writeLocTimestamp(effectiveDriverId, Date.now())
+        }
+      }
+
+      onCarPosChange?.(p)
+    },
+    [effectiveDriverId, onCarPosChange, isDriverMoving]
+  )
+
+
+    useEffect(() => {
     if (myActiveOrder?.id != null) {
       setSelectedOrderId(myActiveOrder.id)
+    } else {
+      setSelectedOrderId(null)
     }
   }, [myActiveOrder])
 
@@ -356,62 +591,197 @@ onDriverLocationChange?.(p)
     const pending = allOrdersFromProps
       .filter(o => isPendingStatus(o?.status))
       .filter(o => getAnyDriverId(o) == null)
-      .map(o => `${o.id}:${round6(getPickupLoc(o)?.lat)}`)
+      .map(o => {
+        const pickup = getPickupLoc(o)
+        const dropoff = getDropoffLoc(o)
+        const stops = getOrderIntermediateStops(o)
+          .map(s => `${round6(s.lat)}:${round6(s.lng)}`)
+          .join(',')
+
+        return [
+          o.id,
+          round6(pickup?.lat),
+          round6(pickup?.lng),
+          round6(dropoff?.lat),
+          round6(dropoff?.lng),
+          stops,
+        ].join(':')
+      })
       .join('|')
 
-    return `${round6(myDriverLoc?.lat)}::${pending}`
+    return `${round6(myDriverLoc?.lat)}:${round6(myDriverLoc?.lng)}::${pending}`
   }, [allOrdersFromProps, myDriverLoc])
 
   useEffect(() => {
-    let cancelled = false
+    if (!myDriverLoc) return
 
-    async function computeDistances() {
-      if (!myDriverLoc) return
-
-      const pending = allOrdersFromProps.filter(
-        o => isPendingStatus(o?.status) && getAnyDriverId(o) == null
-      )
-      if (!pending.length) return
-
-      const results = await mapLimit(pending, 4, async o => {
-        const p = getPickupLoc(o)
-        if (!p || cancelled) return null
-        try {
-          return { id: o.id, dKm: await osrmDistanceKm(myDriverLoc, p) }
-        } catch {
-          return null
-        }
-      })
-
-      if (!cancelled) {
-        const distMap = {}
-        results.forEach(r => {
-          if (r) distMap[r.id] = r.dKm
-        })
-        setOrderDistances(distMap)
-      }
+    if (isDriverMoving) {
+      setOrderDistances({})
+      return
     }
 
-    computeDistances()
-    return () => { cancelled = true }
-  }, [pendingHash, allOrdersFromProps, myDriverLoc])
+    const pending = allOrdersFromProps.filter(
+      o => isPendingStatus(o?.status) && getAnyDriverId(o) == null
+    )
+
+    if (!pending.length) {
+      setOrderDistances({})
+      return
+    }
+
+    const distMap = {}
+
+    pending.forEach(o => {
+      const points = buildOrderRoutePoints(myDriverLoc, o)
+      const totalKm = routeDistanceKm(points)
+      if (!Number.isFinite(Number(totalKm))) return
+      distMap[o.id] = Number(totalKm)
+    })
+
+    setOrderDistances(distMap)
+  }, [pendingHash, allOrdersFromProps, myDriverLoc, isDriverMoving])
 
   const pendingOrders = useMemo(() => {
-    return allOrdersFromProps
+    const base = allOrdersFromProps
       .filter(o => isPendingStatus(o?.status) && getAnyDriverId(o) == null)
       .filter(o => !myCarType || normalizeVehicleType(o?.vehicleType) === myCarType)
       .map(o => {
-        const d = orderDistances[o.id]
-        const price = o.estimatedFare || o.price || null
+        const pickupLocation = getPickupLoc(o)
+        const dropoffLocation = getDropoffLoc(o)
+
+        const totalDistanceKmFromMap = Number(orderDistances[o.id])
+        const fallbackPoints =
+          myDriverLoc ? buildOrderRoutePoints(myDriverLoc, o) : []
+        const fallbackDistanceKm = routeDistanceKm(fallbackPoints)
+
+        const driverDistanceKm =
+          Number.isFinite(totalDistanceKmFromMap) && totalDistanceKmFromMap > 0
+            ? totalDistanceKmFromMap
+            : Number.isFinite(Number(fallbackDistanceKm))
+            ? Number(fallbackDistanceKm)
+            : null
+
+        const price = getOrderPrice(o)
+
+        const nearestHotspot = dropoffLocation
+          ? findNearestHotspotForPoint(dropoffLocation, hotspots)
+          : null
+
+        const hotspotDemand = Number(nearestHotspot?.pred_rides ?? 0)
+        const hotspotPriority = Number(nearestHotspot?.priority ?? 0)
+
         return {
           ...o,
-          pickupLocation: getPickupLoc(o),
-          dispatchScore: d ? Math.max(1, Math.min(10, Math.round(11 - d))) : null,
-          driverDistanceKm: d || null,
+          pickupLocation,
+          dropoffLocation,
+          distanceKm: driverDistanceKm,
+          dispatchScore:
+            Number.isFinite(driverDistanceKm)
+              ? Math.max(1, Math.min(10, Math.round(11 - driverDistanceKm)))
+              : null,
+          driverDistanceKm,
           price,
+          _recommendDemandRaw: hotspotDemand,
+          _recommendPriorityRaw: hotspotPriority,
+          _recommendDropoffHotspot: nearestHotspot || null,
         }
       })
-  }, [allOrdersFromProps, myCarType, orderDistances])
+
+    if (isDriverMoving) {
+      return base.map(o => ({
+        ...o,
+        dispatchScore: null,
+        driverDistanceKm: null,
+        distanceKm: null,
+        recommendScore: '移動中',
+        recommendGain: null,
+        recommendAccept: null,
+        recommendLabel: '',
+        recommendEarningRaw: null,
+        recommendEarningN: null,
+        recommendDemandN: null,
+        recommendPriorityN: null,
+        recommendDistanceN: null,
+        recommendZoneSupply: null,
+        recommendLocalSupply: null,
+      }))
+    }
+
+    const demandValues = base.map(o => Number(o._recommendDemandRaw ?? 0))
+    const priorityValues = base.map(o => Number(o._recommendPriorityRaw ?? 0))
+    const distanceValues = base
+      .map(o => Number(o.driverDistanceKm ?? Infinity))
+      .filter(Number.isFinite)
+
+    const earningValues = base.map(o => {
+      const price = Number(o.price ?? 0)
+      const dkm = Math.max(Number(o.driverDistanceKm ?? 0), 0.3)
+      return Number.isFinite(price) && price > 0 ? price / dkm : 0
+    })
+
+    const zoneSupplyValues = base.map(o => {
+      const dropoff = o.dropoffLocation
+      if (!dropoff) return 0
+      return base.filter(other => {
+        if (other.id === o.id) return false
+        if (!other.dropoffLocation) return false
+        return haversineKm(dropoff, other.dropoffLocation) <= ORDER_LOCAL_RADIUS_KM
+      }).length
+    })
+
+    return base.map((o, idx) => {
+      const price = Number(o.price ?? 0)
+      const dkm = Math.max(Number(o.driverDistanceKm ?? 0), 0.3)
+      const earningRaw = Number.isFinite(price) && price > 0 ? price / dkm : 0
+
+      const earningN = minmax01FromValues(earningRaw, earningValues)
+      const demandN = minmax01FromValues(o._recommendDemandRaw ?? 0, demandValues)
+      const priorityN = minmax01FromValues(o._recommendPriorityRaw ?? 0, priorityValues)
+      const distanceN = minmax01FromValues(o.driverDistanceKm ?? 0, distanceValues)
+
+      const zoneSupply = zoneSupplyValues[idx] ?? 0
+      const localSupply = zoneSupply
+      const zoneSupplyN = minmax01FromValues(zoneSupply, zoneSupplyValues)
+      const localSupplyN = minmax01FromValues(localSupply, zoneSupplyValues)
+
+      const recommendScore =
+        ORDER_W_EARNING * earningN +
+        ORDER_W_DEMAND * demandN +
+        ORDER_W_PRIORITY * priorityN -
+        ORDER_W_DISTANCE * distanceN -
+        ORDER_W_ZONE_SUPPLY * zoneSupplyN -
+        ORDER_W_LOCAL_SUPPLY * localSupplyN
+
+      const recommendGain = recommendScore
+      const recommendAccept = recommendGain > ORDER_RECOMMEND_MIN_GAIN
+
+      return {
+        ...o,
+        recommendScore,
+        recommendGain,
+        recommendAccept,
+        recommendLabel: recommendAccept ? '是' : '否',
+
+        recommendEarningRaw: earningRaw,
+        recommendEarningN: earningN,
+
+        recommendDemandRaw: o._recommendDemandRaw ?? 0,
+        recommendDemandN: demandN,
+
+        recommendPriorityRaw: o._recommendPriorityRaw ?? 0,
+        recommendPriorityN: priorityN,
+
+        recommendDistanceRaw: o.driverDistanceKm ?? null,
+        recommendDistanceN: distanceN,
+
+        recommendZoneSupply: zoneSupply,
+        recommendZoneSupplyN: zoneSupplyN,
+
+        recommendLocalSupply: localSupply,
+        recommendLocalSupplyN: localSupplyN,
+      }
+    })
+  }, [allOrdersFromProps, myCarType, orderDistances, hotspots, myDriverLoc, isDriverMoving])
 
   const displayOrders = useMemo(() => {
     if (myActiveOrder) {
@@ -426,6 +796,8 @@ onDriverLocationChange?.(p)
     let baseOrder = null
     if (myActiveOrder) {
       baseOrder = myActiveOrder
+    } else if (myHotspotMove) {
+      baseOrder = myHotspotMove
     } else if (selectedOrderId) {
       baseOrder = pendingOrders.find(o => o.id === selectedOrderId) || null
     } else {
@@ -438,9 +810,14 @@ onDriverLocationChange?.(p)
     if (!baseOrder) return []
 
     const pickup = getPickupLoc(baseOrder)
-    if (!pickup) return []
+    if (!pickup && !baseOrder?._isHotspotMove) return []
 
+    const dropoff = getDropoffLoc(baseOrder)
     const { polyline, route, directions, path, ...cleanOrder } = baseOrder
+
+    if (baseOrder?._isHotspotMove) {
+      return [baseOrder]
+    }
 
     const linearStops = [
       {
@@ -463,20 +840,31 @@ onDriverLocationChange?.(p)
       if (type === 'driver' || type === 'pickup') return false
 
       const lat = Number(s.lat)
-      const lng = Number(s.lng)
+      const lng = Number(s.lng ?? s.lon)
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false
 
       const isAtPickup =
         Math.abs(lat - pickup.lat) < 0.0001 &&
         Math.abs(lng - pickup.lng) < 0.0001
 
-      return !isAtPickup
+      const isAtDropoff =
+        dropoff &&
+        Math.abs(lat - dropoff.lat) < 0.0001 &&
+        Math.abs(lng - dropoff.lng) < 0.0001
+
+      return !isAtPickup && !isAtDropoff
     })
+
+    const stopSig = originalStops
+      .map(s => `${round6(Number(s.lat))},${round6(Number(s.lng ?? s.lon))}`)
+      .join('|')
 
     const routeSig =
       `${effectiveDriverId}:${baseOrder.id}:` +
       `${round6(myDriverLoc.lat)},${round6(myDriverLoc.lng)}->` +
-      `${round6(pickup.lat)},${round6(pickup.lng)}`
+      `${round6(pickup.lat)},${round6(pickup.lng)}->` +
+      `${stopSig}->` +
+      `${round6(dropoff?.lat)},${round6(dropoff?.lng)}`
 
     return [
       {
@@ -490,12 +878,8 @@ onDriverLocationChange?.(p)
 
 const shouldFollowCar = useMemo(() => {
   if (!locConfirmed || !myDriverLoc) return false
-  return Boolean(
-    myActiveOrder ||
-    selectedOrderId != null ||
-    mapOrders.length > 0
-  )
-}, [locConfirmed, myDriverLoc, myActiveOrder, selectedOrderId, mapOrders])
+  return Boolean(myActiveOrder || myHotspotMove)
+}, [locConfirmed, myDriverLoc, myActiveOrder, myHotspotMove])
 
   const myCompletedOrders = useMemo(() => {
     if (effectiveDriverId == null) return []
@@ -534,7 +918,7 @@ const shouldFollowCar = useMemo(() => {
 
     const price = newlyCompleted.estimatedFare || newlyCompleted.price || null
     setCompletedNotice(
-      `此筆訂單已完成（#${newlyCompleted.id}），金額：${price != null ? `$${price.toFixed(2)}` : '未知'}`
+      `${t(lang, 'driverCompletedNoticePrefix')}（#${newlyCompleted.id}），${t(lang, 'driverCompletedNoticePriceLabel')}${price != null ? `$${price.toFixed(2)}` : t(lang, 'unknownValue')}`
     )
     setTimeout(() => setCompletedNotice(''), 7000)
   }, [myCompletedOrders])
@@ -552,7 +936,7 @@ key={`driver-map:${driverReady ? effectiveDriverId : 'pending'}`}          lang=
           driverClickEnabled={driverReady && !locConfirmed}
           simulateVehicles={simulateVehicles}
           onOrderCompleted={onOrderCompleted}
-          onCarPosChange={onCarPosChange}
+          onCarPosChange={handleCarPosChange}
           usePersistedDriverLoc={false}
           followActiveCar={shouldFollowCar}
           previewEnabled={false}
@@ -561,8 +945,21 @@ key={`driver-map:${driverReady ? effectiveDriverId : 'pending'}`}          lang=
         />
       </div>
 
-      <aside className="side-panel">
-        <div className="panel-inner">
+      <aside className={`side-panel ${panelCollapsed ? 'collapsed' : ''}`}>
+       
+        <button
+        type="button"
+        className="panel-toggle-btn"
+        onClick={() => setPanelCollapsed(v => !v)}
+        aria-label={panelCollapsed ? t(lang, 'panelExpand') : t(lang, 'panelCollapse')}
+        title={panelCollapsed ? t(lang, 'panelExpand') : t(lang, 'panelCollapse')}
+      >
+        {panelCollapsed
+          ? `⌃ ${t(lang, 'panelExpand')}`
+          : `⌄ ${t(lang, 'panelCollapse')}`}
+      </button>
+
+        <div className={`panel-inner ${panelCollapsed ? 'hidden' : ''}`}>
           <h1 className="panel-title">{t(lang, 'driverMode')}</h1>
 
           <div className="field-label">{t(lang, 'currentDriverLabel')}</div>
@@ -575,7 +972,7 @@ key={`driver-map:${driverReady ? effectiveDriverId : 'pending'}`}          lang=
               onClick={goAuth}
               style={{ cursor: 'pointer' }}
             >
-              請先登入
+              {t(lang, 'pleaseLoginFirst')}
             </button>
           )}
 
@@ -583,7 +980,7 @@ key={`driver-map:${driverReady ? effectiveDriverId : 'pending'}`}          lang=
 
           {isLoggedIn && !locConfirmed && (
             <div className="ub-toast ub-toast--warn" style={{ marginBottom: 12 }}>
-              ⚠️ 請先在地圖上點擊一下，設定您的初始位置。
+              {t(lang, 'driverSetInitialLocationHint')}
             </div>
           )}
 
@@ -595,7 +992,7 @@ key={`driver-map:${driverReady ? effectiveDriverId : 'pending'}`}          lang=
                 onClick={resetMyLocation}
                 style={{ width: '100%' }}
               >
-                重設定位（debug）
+                {t(lang, 'driverResetLocationDebug')}
               </button>
             </div>
           )}
@@ -629,7 +1026,7 @@ key={`driver-map:${driverReady ? effectiveDriverId : 'pending'}`}          lang=
 
           {isLoggedIn && myCompletedOrders.length > 0 && (
             <section className="orders-block" style={{ marginTop: 14 }}>
-              <h3>已完成訂單</h3>
+              <h3>{t(lang, 'driverCompletedOrdersTitle')}</h3>
               {myCompletedOrders.slice(0, 5).map(o => (
                 <div
                   key={o.id}
@@ -642,12 +1039,13 @@ key={`driver-map:${driverReady ? effectiveDriverId : 'pending'}`}          lang=
                   }}
                 >
                   <div style={{ fontWeight: 800 }}>
-                    訂單 #{o.id} <span style={{ color: 'green' }}>已完成</span>
+                    {t(lang, 'driverOrderPrefix')}{o.id}{' '}
+                    <span style={{ color: 'green' }}>{t(lang, 'driverCompletedTag')}</span>
                   </div>
                   <div style={{ fontSize: 13 }}>
-                    上車：{o.pickup}
+                    {t(lang, 'orderPickupLabel')}：{o.pickup}
                     <br />
-                    下車：{o.dropoff}
+                    {t(lang, 'orderDropoffLabel')}：{o.dropoff}
                   </div>
                 </div>
               ))}
