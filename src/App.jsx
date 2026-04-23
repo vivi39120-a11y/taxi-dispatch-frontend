@@ -593,7 +593,7 @@ export default function App() {
       setZonesLoading(true)
       setZonesError('')
 
-      const res = await apiFetch('/api/zone-hotspots', { timeoutMs: 60000 })
+      const res = await apiFetch('/api/zone-hotspots', { timeoutMs: 360000 })
       if (!res.ok) throw new Error(`zone-hotspots ${res.status}`)
 
       const data = await res.json()
@@ -655,7 +655,7 @@ export default function App() {
 
       // 乘客補齊後端狀態（login / auto register）
       const pCred = readPassengerCred()
-      if (pCred?.username && pCred.password) {
+      if (mode !== 'driver' && pCred?.username && pCred.password) {
         try {
           const res = await apiFetch('/api/login', {
             method: 'POST',
